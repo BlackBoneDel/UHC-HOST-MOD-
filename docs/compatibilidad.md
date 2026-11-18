@@ -16,6 +16,10 @@ El servidor **ejecuta Paper 26.3** (Java 25); el protocolo nativo se obtiene de 
 
 La identificación de protocolo usa `Via.getAPI().getPlayerVersion(player)` **4 ticks después** de `PlayerJoinEvent`. Protocolos desconocidos o superiores al servidor se rechazan. ViaBackwards debe estar instalado para los clientes anteriores a 26.3; no basta con instalar ViaVersion. El cliente antiguo recibe traducciones de los contenidos nativos, no el contenido original inexistente de su versión.
 
+## Decisión de producto — Freeze, ruta A (Prompt Maestro §6.7)
+
+Se aplica la regla original: el chat normal de un jugador congelado se cancela y se reemite con prefijo `[Frozen]` **a todos los jugadores conectados**, no solo al staff. Los comandos `/msg` dirigidos a staff siguen disponibles. **Riesgo competitivo conocido:** ese chat público puede divulgar tácticas; el staff debe supervisarlo durante una partida oficial. No se presenta como una conversación privada de moderación.
+
 ## Resource pack y conectividad
 
 El pack nativo `resourcepack/pack.mcmeta` declara formato `[97,1]`, que corresponde a 26.3. El pack `resourcepack/legacy/` contiene la misma fuente de espacios negativos sin el modelo de ítem moderno; su metadato abarca 1.17–26.2 y se sirve a clientes antiguos en modo flexible. En esas versiones, la cabeza dorada mantiene su forma de cabeza de jugador sin el modelo custom nuevo. Los dos `.zip` se generan en Gradle y se sirven en el puerto configurado; **abrir el puerto TCP** al público y configurar `resource-pack.host-publico` con DNS/IP de acceso público (no `localhost`, no una IP privada). El servidor detecta su IP local como ayuda inicial y avisa en consola si no se configuró el host público. Se envía el pack como **obligatorio** con SHA-1; el cliente puede rechazarlo y, en ese caso, Paper impide su entrada. No hay dependencia de CDN.

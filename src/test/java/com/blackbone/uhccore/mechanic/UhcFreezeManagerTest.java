@@ -57,7 +57,7 @@ class UhcFreezeManagerTest {
         assertFalse(walking.isCancelled());
     }
 
-    @Test void frozenChatIsPrivateToStaffAndEchoedToItsSender() {
+    @Test void frozenChatIsPrefixedAndSentToEveryOnlinePlayer() {
         PlayerMock publicPlayer = server.addPlayer("PublicPlayer");
         freeze.freeze(victim, staff);
         Component text = Component.text("please help");
@@ -73,7 +73,7 @@ class UhcFreezeManagerTest {
         assertEquals("[Frozen] FrozenPlayer: please help",
             PlainTextComponentSerializer.plainText().serialize(received));
         assertEquals(received, victim.nextComponentMessage());
-        assertNull(publicPlayer.nextComponentMessage());
+        assertEquals(received, publicPlayer.nextComponentMessage());
     }
 
     @Test void onlyMessagesToOnlineStaffRemainAvailable() {
