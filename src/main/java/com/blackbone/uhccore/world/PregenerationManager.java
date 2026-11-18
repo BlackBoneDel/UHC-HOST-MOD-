@@ -93,6 +93,8 @@ public final class PregenerationManager {
                 }
                 job = loaded;
                 plugin.getLogger().info("Restored world generation: " + loaded.state + " (" + loaded.generated + "/" + loaded.total + ")");
+            } else {
+                plugin.getLogger().info("Generation checkpoint ready: no previous job");
             }
             restored = true;
         }));

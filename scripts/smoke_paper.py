@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -79,6 +80,30 @@ def check_pack(artifact: Path) -> None:
     print(f"Pack HTTP verified: {len(pack)} bytes, SHA-1 {hashlib.sha1(pack).hexdigest()}", flush=True)
 
 
+def send_command(process: subprocess.Popen, command: str) -> None:
+    if process.poll() is not None:
+        raise RuntimeError(f"Paper exited before console command: {command}")
+    process.stdin.write(command + "\n")
+    process.stdin.flush()
+
+
+def check_checkpoint(server: Path) -> None:
+    world = server / "uhc_world" / "level.dat"
+    if not world.is_file():
+        raise RuntimeError("Paper did not save the created UHC world")
+    database_path = server / "plugins/UhcCore/data/uhc.db"
+    if not database_path.is_file():
+        raise RuntimeError("UhcCore did not create its SQLite database")
+    with sqlite3.connect(database_path) as db:
+        checkpoint = db.execute("SELECT world_name, state, radius, next_index, generated "
+                                "FROM generation WHERE id=1").fetchone()
+    if checkpoint is None or checkpoint[0] != "uhc_world" or checkpoint[1] != "CANCELLED" or checkpoint[2] != 75:
+        raise RuntimeError(f"World pregeneration checkpoint was not persisted: {checkpoint}")
+    if checkpoint[3] < 0 or checkpoint[4] < 0 or checkpoint[4] > checkpoint[3]:
+        raise RuntimeError(f"Invalid persisted generation progress: {checkpoint}")
+    print(f"World generated and SQLite checkpoint persisted: {checkpoint}", flush=True)
+
+
 def main(artifact: Path) -> None:
     base = Path("build/paper-smoke").resolve()
     server = base / "server"
@@ -106,9 +131,15 @@ def main(artifact: Path) -> None:
             if "Using internal ranks.yml permissions" not in output:
                 raise RuntimeError("UhcCore did not initialize its permissions/database")
             check_pack(artifact)
-            process.stdin.write("uhc info\n")
-            process.stdin.flush()
+            send_command(process, "uhc info")
             wait_for_log(process, log_path, "Este comando requiere un jugador", 30)
+            wait_for_log(process, log_path, "Generation checkpoint ready: no previous job", 30)
+            send_command(process, "uhc pregenerate start")
+            wait_for_log(process, log_path, "Generación: start.", 90)
+            send_command(process, "uhc pregenerate pause")
+            wait_for_log(process, log_path, "Generación: pause.", 30)
+            send_command(process, "uhc pregenerate cancel")
+            wait_for_log(process, log_path, "Generación: cancel.", 30)
             print(f"Paper 26.3 build {build}: UhcCore enabled, /uhc registered, SQLite and HTTP pack ready", flush=True)
         except Exception as error:
             tail = "\n".join(read_log(log_path).splitlines()[-100:])[-13000:]
@@ -127,6 +158,7 @@ def main(artifact: Path) -> None:
                     process.wait(timeout=15)
     if process.returncode != 0:
         raise RuntimeError(f"Paper exited with code {process.returncode} after stop")
+    check_checkpoint(server)
 
 
 if __name__ == "__main__":
