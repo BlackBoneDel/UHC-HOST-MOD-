@@ -56,4 +56,8 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "build/libs/uhccore-${UHC_VERSION}.jar" --title "UhcCore ${UHC_VERSION}" --notes-file changelog.md --verify-tag
+        run: |
+          options=()
+          # Candidate tags publish artifacts for validation, not an approved league release.
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then options+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" "build/libs/uhccore-${UHC_VERSION}.jar" --title "UhcCore ${UHC_VERSION}" --notes-file changelog.md --verify-tag "${options[@]}"
