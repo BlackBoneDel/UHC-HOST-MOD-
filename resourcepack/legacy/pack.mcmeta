@@ -1,0 +1,9 @@
+{
+  "pack": {
+    "description": "UhcCore | compatible negative-space HUD, 1.17-26.2",
+    "pack_format": 7,
+    "supported_formats": [7, 97],
+    "min_format": [7, 0],
+    "max_format": [97, 0]
+  }
+}

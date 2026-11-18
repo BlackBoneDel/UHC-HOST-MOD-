@@ -1,0 +1,34 @@
+name: UhcCore
+version: ${version}
+main: com.blackbone.uhccore.UhcCorePlugin
+api-version: '26.3'
+description: Core de UHC competitivo, una partida activa por servidor
+author: BlackBoneDel
+load: POSTWORLD
+# Paper uses dependencies.server for soft dependencies; the legacy key is documentary.
+softdepend: [ViaVersion, LuckPerms]
+dependencies:
+  server:
+    ViaVersion:
+      load: BEFORE
+      required: false
+      join-classpath: true
+    LuckPerms:
+      load: BEFORE
+      required: false
+      join-classpath: false
+permissions:
+  uhccore.play:
+    default: true
+  uhccore.staff:
+    default: op
+  uhccore.staff.notify:
+    default: op
+  uhccore.admin:
+    default: op
+  uhccore.rank.admin:
+    default: op
+  uhccore.rank.staff:
+    default: op
+  uhccore.proxy:
+    default: op

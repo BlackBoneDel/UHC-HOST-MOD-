@@ -1,0 +1,37 @@
+UhcCore — third-party notices (binary distribution)
+
+This project is licensed under GNU GPL version 3; see LICENSE. The shaded
+JAR contains the following independently licensed code, relocated where
+native binary linkage permits. Relocation changes Java package names only
+and does not change the upstream copyright or license. Original license texts are in licenses/ and are bundled
+in META-INF/licenses/ inside the released JAR.
+
+* PacketEvents 2.14.0 — retrooper and contributors — GNU GPL-3.0-or-later.
+  com.github.retrooper.packetevents and io.github.retrooper.packetevents
+  -> com.blackbone.uhccore.libs.packetevents[.platform].
+  https://github.com/retrooper/packetevents (licenses/PacketEvents-LICENSE.txt)
+* FastBoard 2.2.2 — MrMicky — MIT License.
+  fr.mrmicky.fastboard -> com.blackbone.uhccore.libs.fastboard.
+  https://github.com/MrMicky-FR/FastBoard (licenses/FastBoard-LICENSE.txt)
+* HikariCP 7.0.2 — Brett Wooldridge and contributors — Apache-2.0.
+  com.zaxxer.hikari -> com.blackbone.uhccore.libs.hikari.
+  https://github.com/brettwooldridge/HikariCP (licenses/HikariCP-LICENSE.txt)
+* sqlite-jdbc 3.53.2.1 — Taro L. Saito and contributors — Apache-2.0;
+  includes SQLite native binaries (public domain) and additional notices.
+  Namespaced Hikari driver entry: com.blackbone.uhccore.libs.sqlite.SQLiteDriver.
+  Its org.sqlite JNI implementation is NOT relocated because the bundled native
+  libraries reference org/sqlite/core/NativeDB by name. Paper isolates the
+  implementation per plugin classloader; rewriting these JNI symbols would
+  make the default SQLite installation fail at runtime on every platform.
+  https://github.com/xerial/sqlite-jdbc
+  (licenses/sqlite-jdbc-LICENSE.txt, licenses/sqlite-jdbc-NOTICE.txt)
+* MySQL Connector/J 9.7.0 Community — Oracle — GPL-2.0 with Universal
+  FOSS Exception 1.0 and additional linking permission; see the original
+  Oracle License Information User Manual, which includes third-party notices.
+  com.mysql.cj -> com.blackbone.uhccore.libs.mysql.
+  https://github.com/mysql/mysql-connector-j
+  (licenses/mysql-connector-j-LICENSE.txt)
+
+Paper API, ViaVersion API, and Adventure API are compile-only and NOT
+shaded into UhcCore. Other transitive classes remain subject to the
+license notices distributed with their respective dependency JARs.

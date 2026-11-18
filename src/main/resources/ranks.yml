@@ -1,0 +1,21 @@
+default: jugador
+ranks:
+  jugador:
+    prefix: '<gray>[Player]</gray>'
+    inherits: []
+    permissions:
+      - uhccore.play
+  staff:
+    prefix: '<aqua>[Staff]</aqua>'
+    inherits: [jugador]
+    permissions:
+      - uhccore.staff
+      - uhccore.staff.notify
+      - uhccore.rank.staff
+  admin:
+    prefix: '<gold>[Admin]</gold>'
+    inherits: [staff]
+    permissions:
+      - uhccore.admin
+      - uhccore.rank.admin
+      - uhccore.proxy

@@ -1,0 +1,37 @@
+name: CI
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+      - name: Unit tests (JUnit 5 / MockBukkit)
+        run: ./gradlew --no-daemon test
+      - name: Business-rule mutation tests (PITest)
+        run: ./gradlew --no-daemon pitest
+      - name: Build shaded plugin and pack
+        run: ./gradlew --no-daemon build
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: verification-reports
+          path: |
+            build/test-results/test/
+            build/reports/tests/test/
+            build/reports/pitest/
+          if-no-files-found: ignore
