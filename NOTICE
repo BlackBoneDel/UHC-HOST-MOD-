@@ -35,6 +35,15 @@ in META-INF/licenses/ inside the released JAR.
   libraries reference org/sqlite/core/NativeDB by name. Paper isolates the
   implementation per plugin classloader; rewriting these JNI symbols would
   make the default SQLite installation fail at runtime on every platform.
+  Alternative evaluated (2026-11-18): rebuilding/renaming the upstream JNI
+  binaries for each supported OS/architecture would permit org.sqlite relocation,
+  but requires maintaining a new native artifact; switching to H2 (pure Java)
+  would change the SQLite file format and require migration. Neither is a safe
+  surgical change to an existing league database. Keep upstream JNI + the
+  namespaced driver adapter under Paper's plugin classloader isolation; do not
+  share this shaded JAR as another plugin's classpath dependency. Residual risk:
+  test native loading on each deployed OS and reassess if Paper changes its
+  classloader isolation. CI smoke-testing covers Linux only.
   https://github.com/xerial/sqlite-jdbc
   (licenses/sqlite-jdbc-LICENSE.txt, licenses/sqlite-jdbc-NOTICE.txt)
 * MySQL Connector/J 9.7.0 Community — Oracle — GPL-2.0 with Universal
