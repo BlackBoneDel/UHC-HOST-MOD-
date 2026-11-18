@@ -1,4 +1,5 @@
 import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.tasks.bundling.Zip
 
 plugins {
@@ -78,6 +79,7 @@ tasks.test {
 tasks.named<ShadowJar>("shadowJar") {
     archiveClassifier.set("")
     mergeServiceFiles()
+    filesMatching("META-INF/services/**") { duplicatesStrategy = DuplicatesStrategy.INCLUDE }
     relocate("com.github.retrooper.packetevents", "com.blackbone.uhccore.libs.packetevents")
     relocate("io.github.retrooper.packetevents", "com.blackbone.uhccore.libs.packetevents.platform")
     relocate("fr.mrmicky.fastboard", "com.blackbone.uhccore.libs.fastboard")
@@ -86,8 +88,13 @@ tasks.named<ShadowJar>("shadowJar") {
     // its JNI implementation would break SQLite on every OS; a namespaced driver adapter
     // below is isolated by Paper's plugin classloader while the JNI payload stays intact.
     relocate("com.mysql.cj", "com.blackbone.uhccore.libs.mysql")
-    // Paper provides these APIs and their class identities must stay shared with the server.
-    exclude("net/kyori/**", "io/netty/**", "org/bukkit/**", "io/papermc/**", "org/slf4j/**")
+    // Paper provides Adventure's text API, but NOT adventure-nbt. PacketEvents
+    // needs BinaryTag while loading its registries in onLoad. Retain NBT and
+    // Kyori's option utility from the dependency, not duplicate text Components.
+    exclude { entry -> entry.path.startsWith("net/kyori/")
+        && !entry.path.startsWith("net/kyori/adventure/nbt/")
+        && !entry.path.startsWith("net/kyori/option/") }
+    exclude("io/netty/**", "org/bukkit/**", "io/papermc/**", "org/slf4j/**")
 }
 
 tasks.build { dependsOn(tasks.shadowJar) }

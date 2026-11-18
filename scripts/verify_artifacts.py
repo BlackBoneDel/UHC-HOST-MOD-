@@ -52,8 +52,10 @@ def main(path: Path) -> None:
         names = set(jar.namelist())
         for item in ("paper-plugin.yml", "com/blackbone/uhccore/UhcCorePlugin.class",
                      "com/blackbone/uhccore/libs/sqlite/SQLiteDriver.class",
-                     "org/sqlite/JDBC.class", "META-INF/LICENSE", "META-INF/NOTICE",
+                     "org/sqlite/JDBC.class", "net/kyori/adventure/nbt/BinaryTag.class",
+                     "META-INF/LICENSE", "META-INF/NOTICE",
                      "META-INF/licenses/sqlite-jdbc-LICENSE.txt",
+                     "META-INF/licenses/Adventure-NBT-LICENSE.txt",
                      "packs/uhccore-pack.zip", "packs/uhccore-legacy-pack.zip"):
             require(item in names, f"missing bundled resource: {item}")
         metadata = jar.read("paper-plugin.yml").decode("utf-8")
