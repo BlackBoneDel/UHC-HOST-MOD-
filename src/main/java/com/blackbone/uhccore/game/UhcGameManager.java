@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.logging.Level;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -124,6 +125,8 @@ public final class UhcGameManager implements Listener {
     private final Map<UUID, String> names = new HashMap<>();
     private final Map<UUID, PregamePlayer> pregamePlayers = new HashMap<>();
     private final List<UUID> eliminationOrder = new ArrayList<>();
+    private final List<CompletableFuture<Void>> statsWrites = new ArrayList<>();
+    private boolean resultConfirmed;
     private CompletableFuture<Void> pendingScatter;
     private CombatLoggerManager combat;
     private SpectatorManager spectators;
@@ -147,6 +150,7 @@ public final class UhcGameManager implements Listener {
     public void setSpectators(SpectatorManager spectators) { this.spectators = java.util.Objects.requireNonNull(spectators); }
     public MatchClock.State state() { return clock.state(); }
     public boolean running() { return clock.state() == MatchClock.State.RUNNING; }
+    public boolean resultConfirmed() { return resultConfirmed; }
     public boolean editable() { return clock.state() == MatchClock.State.IDLE || clock.state() == MatchClock.State.FINISHED; }
     public boolean isAlive(UUID id) { return alive.contains(id); }
     public boolean isEliminated(UUID id) { return eliminated.contains(id); }
@@ -175,6 +179,8 @@ public final class UhcGameManager implements Listener {
         World world = worlds.ensureWorld();
         worlds.resetBorder();
         matchId = UUID.randomUUID();
+        resultConfirmed = false;
+        statsWrites.clear();
         alive.clear(); eliminated.clear(); names.clear(); eliminationOrder.clear(); pregamePlayers.clear();
         scatterReady = false; borderPhase = -1; lastSecond = -1;
         clock.begin(settings.integer("pre-game-seconds"), now());
@@ -233,7 +239,7 @@ public final class UhcGameManager implements Listener {
         }
         pregamePlayers.clear();
         if (spectators != null) spectators.restoreLateJoiners();
-        alive.clear(); names.clear(); eliminationOrder.clear();
+        alive.clear(); names.clear(); eliminationOrder.clear(); statsWrites.clear();
         border = null; scatterReady = false; matchId = null;
     }
 
@@ -241,8 +247,9 @@ public final class UhcGameManager implements Listener {
 
     public void reset() {
         if (clock.state() != MatchClock.State.FINISHED) throw new IllegalStateException("Finish the match first");
+        if (!resultConfirmed) throw new IllegalStateException("Ranked result NOT CONFIRMED in database; resolve persistence before reset");
         combat.clearRound();
-        clock.reset(); hunter.reset();
+        clock.reset(); hunter.reset(); resultConfirmed = false; statsWrites.clear();
         alive.clear(); names.clear(); eliminationOrder.clear();
         // Retain eliminated IDs until the next match starts: an offline player
         // may still have a pre-death inventory saved on disk and must be cleared
@@ -262,10 +269,20 @@ public final class UhcGameManager implements Listener {
             pendingScatter = null;
             pregamePlayers.clear();
             startedWall = System.currentTimeMillis();
-            stats.participation(Bukkit.getOnlinePlayers().stream()
-                .filter(p -> alive.contains(p.getUniqueId())).map(p -> (Player) p).toList());
-            discord.announce("UHC started: " + alive.size() + " players. World: " + worlds.ensureWorld().getName());
-            for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.started", "count", String.valueOf(alive.size()));
+            UUID startedId = matchId;
+            int participants = alive.size();
+            statsWrites.add(stats.participation(Bukkit.getOnlinePlayers().stream()
+                .filter(p -> alive.contains(p.getUniqueId())).map(p -> (Player) p).toList())
+                .whenComplete((ignored, error) -> {
+                    if (error != null) {
+                        plugin.getLogger().log(Level.SEVERE, "Match " + startedId + " participation NOT CONFIRMED", error);
+                    } else if (plugin.isEnabled()) Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (!startedId.equals(matchId)) return;
+                        discord.announce("UHC started: " + participants + " players. World: " + worlds.ensureWorld().getName());
+                        for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.started",
+                            "count", String.valueOf(participants));
+                    });
+                }));
         }
         if (!running()) return;
         long seconds = elapsed();
@@ -349,10 +366,22 @@ public final class UhcGameManager implements Listener {
         if (!alive.remove(id)) return;
         eliminated.add(id); eliminationOrder.add(id);
         int bounty = hunter.bounty(id, killer);
-        stats.death(id, name, killer, killer == null ? "" : name(killer), assists, bounty);
-        for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.eliminated", "player", name,
-            "alive", String.valueOf(alive.size()));
-        discord.announce("UHC elimination: " + name + (killer == null ? "" : " by " + name(killer)) + ". Alive: " + alive.size());
+        UUID eliminatedMatchId = matchId;
+        int survivors = alive.size();
+        String creditedName = killer == null ? "" : name(killer);
+        statsWrites.add(stats.death(id, name, killer, creditedName, assists, bounty)
+            .whenComplete((ignored, error) -> {
+                if (error != null) {
+                    plugin.getLogger().log(Level.SEVERE,
+                        "Match " + eliminatedMatchId + " elimination of " + id + " NOT CONFIRMED", error);
+                } else if (plugin.isEnabled()) Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (!eliminatedMatchId.equals(matchId)) return;
+                    for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.eliminated",
+                        "player", name, "alive", String.valueOf(survivors));
+                    discord.announce("UHC elimination: " + name
+                        + (creditedName.isBlank() ? "" : " by " + creditedName) + ". Alive: " + survivors);
+                });
+            }));
         maybeFinish();
     }
 
@@ -378,28 +407,42 @@ public final class UhcGameManager implements Listener {
         if (winner != null && combat.hasProxy(winner)) return;
         clock.finish();
         if (spectators != null) spectators.restoreLateJoiners();
-        if (winner != null) stats.victory(winner, name(winner));
+        resultConfirmed = false;
+        if (winner != null) statsWrites.add(stats.victory(winner, name(winner)));
         List<UUID> ranking = new ArrayList<>(alive);
         for (int i = eliminationOrder.size() - 1; i >= 0; i--) ranking.add(eliminationOrder.get(i));
         String standing = ranking.stream().limit(5).map(id -> name(id)).collect(java.util.stream.Collectors.joining(", "));
-        discord.announce("UHC finished. Winner: " + (winner == null ? "none" : name(winner)) + ". Ranking: " + standing);
-        for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.finished",
-            "winner", winner == null ? "-" : name(winner), "ranking", standing);
         UUID winningId = winner;
         UUID completedMatchId = matchId;
         long startedAt = startedWall;
         long endedAt = System.currentTimeMillis();
         String finalRanking = ranking.stream().map(UUID::toString).collect(java.util.stream.Collectors.joining(","));
-        database.async(connection -> {
-            try (PreparedStatement statement = connection.prepareStatement("INSERT INTO matches(id,started_ms,ended_ms,winner_uuid,ranking) VALUES(?,?,?,?,?)")) {
-                statement.setString(1, completedMatchId.toString()); statement.setLong(2, startedAt);
-                statement.setLong(3, endedAt);
-                statement.setString(4, winningId == null ? null : winningId.toString());
-                statement.setString(5, finalRanking);
-                statement.executeUpdate();
-            }
-            return null;
-        });
+        // Do not record or announce a ranked result unless every stats transaction succeeded.
+        CompletableFuture.allOf(statsWrites.toArray(CompletableFuture[]::new))
+            .thenCompose(ignored -> database.async(connection -> {
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO matches(id,started_ms,ended_ms,winner_uuid,ranking) VALUES(?,?,?,?,?)")) {
+                    statement.setString(1, completedMatchId.toString()); statement.setLong(2, startedAt);
+                    statement.setLong(3, endedAt);
+                    statement.setString(4, winningId == null ? null : winningId.toString());
+                    statement.setString(5, finalRanking);
+                    statement.executeUpdate();
+                }
+                return null;
+            }))
+            .whenComplete((ignored, error) -> {
+                if (error != null) {
+                    plugin.getLogger().log(Level.SEVERE,
+                        "Match " + completedMatchId + " result NOT CONFIRMED; reset blocked until repaired", error);
+                } else if (plugin.isEnabled()) Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (!completedMatchId.equals(matchId) || state() != MatchClock.State.FINISHED) return;
+                    resultConfirmed = true;
+                    discord.announce("UHC finished. Winner: " + (winningId == null ? "none" : name(winningId))
+                        + ". Ranking: " + standing);
+                    for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.finished",
+                        "winner", winningId == null ? "-" : name(winningId), "ranking", standing);
+                });
+            });
     }
 
     @EventHandler(priority = EventPriority.HIGHEST) public void quit(PlayerQuitEvent event) {

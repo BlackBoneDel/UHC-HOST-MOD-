@@ -70,15 +70,21 @@ public final class Database implements AutoCloseable {
         CompletableFuture<T> result = new CompletableFuture<>();
         try {
             worker.execute(() -> {
-                try (Connection connection = connection()) {
-                    result.complete(query.run(connection));
+                try {
+                    T value;
+                    try (Connection connection = connection()) {
+                        value = query.run(connection);
+                    }
+                    // A successful future is an acknowledgement only after the
+                    // connection has closed without error (and any transaction committed).
+                    result.complete(value);
                 } catch (Exception exception) {
                     logger.log(Level.SEVERE, "Database operation failed", exception);
                     result.completeExceptionally(exception);
                 }
             });
         } catch (java.util.concurrent.RejectedExecutionException exception) {
-            logger.log(Level.SEVERE, "Database queue full: rejecting write instead of blocking server tick", exception);
+            logger.log(Level.SEVERE, "Database worker rejected operation (queue full or shut down)", exception);
             result.completeExceptionally(exception);
         }
         return result;

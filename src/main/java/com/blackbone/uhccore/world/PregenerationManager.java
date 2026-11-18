@@ -4,8 +4,9 @@ import com.blackbone.uhccore.db.Database;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.HashSet;
-import java.util.logging.Level;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.logging.Level;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.plugin.Plugin;
@@ -13,7 +14,8 @@ import org.bukkit.plugin.Plugin;
 /** Bounded async chunk pipeline with a contiguous, crash-safe DB checkpoint. */
 public final class PregenerationManager {
     public enum State { RUNNING, PAUSED, CANCELLED, COMPLETED }
-    public record Progress(State state, int generated, int total, double perSecond, long etaSeconds) {
+    public record Progress(State state, int generated, int total, double perSecond, long etaSeconds,
+                           boolean confirmed, boolean failed) {
         public float fraction() { return total == 0 ? 0 : (float) generated / total; }
     }
 
@@ -39,6 +41,14 @@ public final class PregenerationManager {
         int committed;
         int generated;
         int inflight;
+        int confirmedCheckpoint;
+        int confirmedGenerated;
+        int pendingWrites;
+        long issuedWrites;
+        long acknowledgedWrite;
+        boolean writeFailed;
+        boolean resumePending;
+        State confirmedState;
         long lastSaved;
         long sampleAt = System.currentTimeMillis();
         int sampleGenerated;
@@ -63,6 +73,7 @@ public final class PregenerationManager {
             }
             cursor = checkpoint; this.checkpoint = checkpoint; committed = generated;
             this.generated = generated; this.state = state; this.startedAt = startedAt;
+            confirmedCheckpoint = checkpoint; confirmedGenerated = generated; confirmedState = state;
             sampleGenerated = generated;
         }
     }
@@ -100,40 +111,51 @@ public final class PregenerationManager {
         }));
     }
 
-    public void start(int radiusBlocks) {
+    public CompletableFuture<Void> start(int radiusBlocks) {
         if (!restored) throw new IllegalStateException("Waiting for generation checkpoint restoration");
-        if (job != null && (job.state == State.RUNNING || job.state == State.PAUSED)) {
-            throw new IllegalStateException("Generation already active; resume or cancel it");
+        if (job != null && (job.state == State.RUNNING || job.state == State.PAUSED
+            || job.inflight != 0 || job.pendingWrites != 0 || job.writeFailed
+            || job.confirmedState != job.state)) {
+            throw new IllegalStateException("Generation or its checkpoint is not confirmed; resume or cancel it");
         }
         if (radiusBlocks < 128 || radiusBlocks > 20000) throw new IllegalArgumentException("Generation radius out of range");
         World world = worlds.ensureWorld();
         job = new Job(world.getName(), (radiusBlocks + 15) / 16, 0, 0, State.RUNNING, System.currentTimeMillis());
-        persist(job);
+        job.confirmedState = null; // No chunks may start before the initial checkpoint is durable.
+        job.resumePending = true;
+        return persist(job);
     }
 
-    public void pause() {
+    public CompletableFuture<Void> pause() {
         if (job == null || job.state != State.RUNNING) throw new IllegalStateException("Generation not running");
-        job.state = State.PAUSED; persist(job);
+        job.state = State.PAUSED; job.resumePending = false;
+        return persist(job);
     }
 
-    public void resume() {
+    public CompletableFuture<Void> resume() {
         if (job == null || job.state != State.PAUSED) throw new IllegalStateException("Generation not paused");
         if (!worlds.ensureWorld().getName().equals(job.worldName)) throw new IllegalStateException("Wrong world");
-        if (job.inflight != 0) throw new IllegalStateException("Wait for pending chunk requests before resuming");
-        // A failed request leaves a hole in the contiguous checkpoint. Revisit
-        // every uncommitted cell instead of reporting an incomplete world as done.
-        job.cursor = job.checkpoint;
+        if (job.inflight != 0 || job.pendingWrites != 0) {
+            throw new IllegalStateException("Wait for pending chunk and checkpoint requests before resuming");
+        }
+        // A failed request/write leaves an uncertain suffix. Replay from the
+        // last acknowledged checkpoint, not merely from the in-memory cursor.
+        job.cursor = job.confirmedCheckpoint;
+        job.checkpoint = job.confirmedCheckpoint;
         job.done.clear();
-        job.generated = job.committed;
+        job.generated = job.confirmedGenerated;
+        job.committed = job.confirmedGenerated;
         job.sampleGenerated = job.generated;
         job.sampleAt = System.currentTimeMillis();
         job.recentRate = 0;
-        job.state = State.RUNNING; persist(job);
+        job.state = State.RUNNING; job.resumePending = true;
+        return persist(job);
     }
 
-    public void cancel() {
+    public CompletableFuture<Void> cancel() {
         if (job == null || job.state == State.COMPLETED || job.state == State.CANCELLED) throw new IllegalStateException("No generation to cancel");
-        job.state = State.CANCELLED; persist(job);
+        job.state = State.CANCELLED; job.resumePending = false;
+        return persist(job);
     }
 
     public Progress progress() {
@@ -146,9 +168,16 @@ public final class PregenerationManager {
             job.sampleGenerated = job.generated;
             job.sampleAt = now;
         }
-        double rate = job.state == State.RUNNING ? job.recentRate : 0;
-        long eta = rate <= 0 ? -1 : (long) Math.ceil((job.total - job.generated) / rate);
-        return new Progress(job.state, job.generated, job.total, rate, eta);
+        double rate = job.state == State.RUNNING && !job.writeFailed ? job.recentRate : 0;
+        long eta = rate <= 0 ? -1 : (long) Math.ceil((job.total - job.confirmedGenerated) / rate);
+        boolean confirmed = job.pendingWrites == 0 && !job.writeFailed
+            && job.confirmedState == job.state && job.confirmedGenerated == job.committed
+            && job.confirmedCheckpoint == job.checkpoint;
+        // Never advertise an unacknowledged completion/cancellation (or initial start).
+        State visibleState = !confirmed && (job.state != State.RUNNING || job.resumePending)
+            ? State.PAUSED : job.state;
+        return new Progress(visibleState, job.confirmedGenerated, job.total, rate, eta, confirmed,
+            job.writeFailed);
     }
 
     static boolean hasCheckpointRoom(Job current) {
@@ -157,7 +186,8 @@ public final class PregenerationManager {
 
     public void tick() {
         Job current = job;
-        if (current == null || current.state != State.RUNNING) return;
+        if (current == null || current.state != State.RUNNING || current.resumePending
+            || current.writeFailed || current.confirmedState == null) return;
         World world = worlds.ensureWorld();
         int cells = current.side * current.side;
         int inspected = 0;
@@ -226,12 +256,14 @@ public final class PregenerationManager {
 
     public void flush() { if (job != null) persist(job); }
 
-    private void persist(Job current) {
+    private CompletableFuture<Void> persist(Job current) {
         current.lastSaved = System.currentTimeMillis();
         int checkpoint = current.checkpoint;
         int completed = current.committed;
         State state = current.state;
-        database.async(connection -> {
+        long sequence = ++current.issuedWrites;
+        current.pendingWrites++;
+        return database.async(connection -> {
             String sql = database.driver().equals("mysql")
                 ? "INSERT INTO generation(id,world_name,radius,next_index,generated,state,started_ms) VALUES(1,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE world_name=VALUES(world_name),radius=VALUES(radius),next_index=VALUES(next_index),generated=VALUES(generated),state=VALUES(state),started_ms=VALUES(started_ms)"
                 : "INSERT INTO generation(id,world_name,radius,next_index,generated,state,started_ms) VALUES(1,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET world_name=excluded.world_name,radius=excluded.radius,next_index=excluded.next_index,generated=excluded.generated,state=excluded.state,started_ms=excluded.started_ms";
@@ -242,6 +274,34 @@ public final class PregenerationManager {
                 stmt.executeUpdate();
             }
             return null;
+        }).whenComplete((ignored, error) -> {
+            if (error != null) plugin.getLogger().log(Level.SEVERE,
+                "Pregeneration checkpoint NOT CONFIRMED for " + current.worldName + " at index "
+                    + checkpoint + " (" + completed + " chunks, " + state + ")", error);
+            Runnable acknowledge = () -> {
+                current.pendingWrites--;
+                if (current != job) return;
+                if (error != null) {
+                    current.writeFailed = true;
+                    current.resumePending = false;
+                    current.state = State.PAUSED; // fail closed; explicit resume/cancel is required
+                } else {
+                    if (sequence > current.acknowledgedWrite) {
+                        current.acknowledgedWrite = sequence;
+                        current.confirmedCheckpoint = checkpoint;
+                        current.confirmedGenerated = completed;
+                        current.confirmedState = state;
+                    }
+                    if (current.state == State.RUNNING && current.resumePending && state == State.RUNNING) {
+                        current.resumePending = false;
+                        current.writeFailed = false;
+                    } else if (current.state == State.CANCELLED && state == State.CANCELLED) {
+                        current.writeFailed = false;
+                    }
+                }
+            };
+            if (Bukkit.isPrimaryThread()) acknowledge.run();
+            else if (plugin.isEnabled()) Bukkit.getScheduler().runTask(plugin, acknowledge);
         });
     }
 }

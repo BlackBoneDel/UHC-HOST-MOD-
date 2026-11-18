@@ -17,6 +17,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.logging.Level;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -27,16 +28,35 @@ public final class StatsManager {
     private final Database database;
     private final Plugin plugin;
     private final LocaleManager locales;
+    // Working scores are used for consecutive kills; only committed scores are exposed to GUIs.
     private final Map<UUID, PlayerStats> cache = new ConcurrentHashMap<>();
+    private final Map<UUID, PlayerStats> committed = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> pending = new ConcurrentHashMap<>();
+    private final Set<UUID> failed = ConcurrentHashMap.newKeySet();
+    private final Set<UUID> languageUnconfirmed = ConcurrentHashMap.newKeySet();
     private final Set<UUID> ready = ConcurrentHashMap.newKeySet();
+    private final Function<List<PlayerStats>, CompletableFuture<Void>> writer;
 
     public StatsManager(Database database, Plugin plugin, LocaleManager locales) {
+        this(database, plugin, locales, null);
+    }
+
+    // A failed future can be injected by tests without replacing the production SQL transaction.
+    StatsManager(Database database, Plugin plugin, LocaleManager locales,
+                 Function<List<PlayerStats>, CompletableFuture<Void>> writer) {
         this.database = database;
         this.plugin = plugin;
         this.locales = locales;
+        this.writer = writer == null ? this::writeToDatabase : writer;
     }
 
-    public boolean ready(UUID uuid) { return ready.contains(uuid); }
+    // Callers (including the profile GUI and match admission) must not present
+    // or rely on a profile while its ranked writes are still unconfirmed.
+    public boolean ready(UUID uuid) { return ready.contains(uuid) && confirmed(uuid); }
+    public boolean confirmed(UUID uuid) {
+        return committed.containsKey(uuid) && !pending.containsKey(uuid) && !failed.contains(uuid);
+    }
+    public boolean languageConfirmed(UUID uuid) { return !languageUnconfirmed.contains(uuid); }
 
     public void leave(Player player, boolean retainForProxy) {
         UUID uuid = player.getUniqueId();
@@ -46,6 +66,7 @@ public final class StatsManager {
 
     public void discardOffline() {
         cache.keySet().removeIf(uuid -> Bukkit.getPlayer(uuid) == null);
+        committed.keySet().removeIf(uuid -> Bukkit.getPlayer(uuid) == null && !pending.containsKey(uuid));
     }
 
     public record Profile(PlayerStats stats, String language, String rank) { }
@@ -77,6 +98,7 @@ public final class StatsManager {
                     // 1000-Elo profile and later overwrite historical match data.
                     // Retained proxy scores are newer than a concurrent DB read.
                     cache.merge(uuid, profile.stats(), (current, ignored) -> current.renamed(name));
+                    committed.merge(uuid, profile.stats(), (current, ignored) -> current.renamed(name));
                     loaded.accept(profile);
                     ready.add(uuid);
                 } catch (RuntimeException ex) {
@@ -88,26 +110,31 @@ public final class StatsManager {
     }
 
     public PlayerStats get(UUID uuid, String name) {
+        PlayerStats current = committed.get(uuid);
+        return current == null ? PlayerStats.fresh(uuid, name) : current;
+    }
+
+    private PlayerStats working(UUID uuid, String name) {
         PlayerStats current = cache.get(uuid);
         return current == null ? PlayerStats.fresh(uuid, name) : current;
     }
 
-    public void participation(Collection<Player> players) {
+    public CompletableFuture<Void> participation(Collection<Player> players) {
         List<PlayerStats> updates = new ArrayList<>();
         for (Player player : players) {
-            PlayerStats stats = get(player.getUniqueId(), player.getName()).participation();
+            PlayerStats stats = working(player.getUniqueId(), player.getName()).participation();
             cache.put(player.getUniqueId(), stats);
             updates.add(stats);
         }
-        persist(updates);
+        return persist("participation", updates);
     }
 
-    public void death(UUID victimId, String victimName, UUID killerId, String killerName,
-                      Collection<UUID> assists, int bonusElo) {
-        PlayerStats victim = get(victimId, victimName);
+    public CompletableFuture<Void> death(UUID victimId, String victimName, UUID killerId, String killerName,
+                                         Collection<UUID> assists, int bonusElo) {
+        PlayerStats victim = working(victimId, victimName);
         List<PlayerStats> updates = new ArrayList<>();
         if (killerId != null && !killerId.equals(victimId)) {
-            PlayerStats killer = get(killerId, killerName);
+            PlayerStats killer = working(killerId, killerName);
             RatingMath.Result rating = RatingMath.duel(killer.elo(), victim.elo());
             PlayerStats awarded = killer.kill(rating.winner() + bonusElo);
             victim = victim.death(rating.loser());
@@ -127,18 +154,19 @@ public final class StatsManager {
                 updates.add(assisted);
             }
         }
-        persist(updates);
+        return persist("death " + victimId, updates);
     }
 
-    public void victory(UUID uuid, String name) {
-        PlayerStats stats = get(uuid, name).victory();
+    public CompletableFuture<Void> victory(UUID uuid, String name) {
+        PlayerStats stats = working(uuid, name).victory();
         cache.put(uuid, stats);
-        persist(List.of(stats));
+        return persist("victory " + uuid, List.of(stats));
     }
 
     public CompletableFuture<Void> language(Player player, String language) {
         UUID id = player.getUniqueId();
         String name = player.getName();
+        languageUnconfirmed.add(id);
         return database.async(connection -> {
             ensure(connection, id, name);
             try (PreparedStatement statement = connection.prepareStatement("UPDATE players SET lang=? WHERE uuid=?")) {
@@ -147,6 +175,10 @@ public final class StatsManager {
                 statement.executeUpdate();
             }
             return null;
+        }).whenComplete((ignored, error) -> {
+            if (error != null) plugin.getLogger().log(Level.SEVERE,
+                "Language write not confirmed for player " + id + " (" + language + ")", error);
+            else languageUnconfirmed.remove(id);
         });
     }
 
@@ -164,9 +196,32 @@ public final class StatsManager {
         });
     }
 
-    private void persist(List<PlayerStats> updates) {
-        if (updates.isEmpty()) return;
-        database.async(connection -> {
+    private CompletableFuture<Void> persist(String operation, List<PlayerStats> updates) {
+        if (updates.isEmpty()) return CompletableFuture.completedFuture(null);
+        List<PlayerStats> snapshot = List.copyOf(updates);
+        for (PlayerStats stats : snapshot) pending.merge(stats.uuid(), 1, Integer::sum);
+        CompletableFuture<Void> write;
+        try {
+            write = writer.apply(snapshot);
+        } catch (RuntimeException exception) {
+            write = CompletableFuture.failedFuture(exception);
+        }
+        return write.whenComplete((ignored, error) -> {
+            for (PlayerStats stats : snapshot) {
+                if (error == null) {
+                    committed.put(stats.uuid(), stats);
+                    failed.remove(stats.uuid());
+                } else failed.add(stats.uuid());
+                pending.computeIfPresent(stats.uuid(), (id, count) -> count == 1 ? null : count - 1);
+            }
+            if (error != null) plugin.getLogger().log(Level.SEVERE,
+                "Ranked stats " + operation + " NOT CONFIRMED for "
+                    + snapshot.stream().map(row -> row.uuid().toString()).toList(), error);
+        });
+    }
+
+    private CompletableFuture<Void> writeToDatabase(List<PlayerStats> updates) {
+        return database.async(connection -> {
             connection.setAutoCommit(false);
             try {
                 for (PlayerStats stats : updates) {

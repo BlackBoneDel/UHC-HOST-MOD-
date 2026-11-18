@@ -139,7 +139,8 @@ public final class AdminPanel implements Listener {
         inventory.setItem(16, GuiItems.item(Material.LIME_DYE, locales.text(player, "config.gen-resume")));
         inventory.setItem(23, GuiItems.item(Material.BARRIER, locales.text(player, "config.gen-cancel")));
         inventory.setItem(22, GuiItems.item(Material.MAP, locales.text(player, "config.gen-status",
-            "state", progress == null ? "IDLE" : progress.state().name(),
+            "state", progress == null ? "IDLE" : progress.failed() ? "FAILED (" + progress.state().name() + ")"
+                : progress.confirmed() ? progress.state().name() : "PENDING (" + progress.state().name() + ")",
             "done", progress == null ? "0" : String.valueOf(progress.generated()),
             "total", progress == null ? "0" : String.valueOf(progress.total()))));
     }

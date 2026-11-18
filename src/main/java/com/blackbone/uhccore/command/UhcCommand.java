@@ -158,14 +158,15 @@ public final class UhcCommand implements BasicCommand {
         if (!permission(sender, "uhccore.admin")) return;
         if (!plugin.game().editable()) { plugin.locales().send(sender, "config.locked"); return; }
         if (args.length < 2) { plugin.locales().send(sender, "command.gen-usage"); return; }
-        switch (args[1]) {
+        CompletableFuture<Void> write = switch (args[1]) {
             case "start" -> plugin.generation().start(plugin.settings().integer("mundo.radio"));
             case "pause" -> plugin.generation().pause();
             case "resume" -> plugin.generation().resume();
             case "cancel" -> plugin.generation().cancel();
-            default -> { plugin.locales().send(sender, "command.gen-usage"); return; }
-        }
-        plugin.locales().send(sender, "command.gen-action", "action", args[1]);
+            default -> null;
+        };
+        if (write == null) { plugin.locales().send(sender, "command.gen-usage"); return; }
+        notifyWhenDone(sender, write, "command.gen-action", "action", args[1]);
     }
 
     private void seed(CommandSender sender, String[] args) {
