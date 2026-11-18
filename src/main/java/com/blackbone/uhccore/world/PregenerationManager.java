@@ -263,7 +263,7 @@ public final class PregenerationManager {
         State state = current.state;
         long sequence = ++current.issuedWrites;
         current.pendingWrites++;
-        return database.async(connection -> {
+        return database.<Void>async(connection -> {
             String sql = database.driver().equals("mysql")
                 ? "INSERT INTO generation(id,world_name,radius,next_index,generated,state,started_ms) VALUES(1,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE world_name=VALUES(world_name),radius=VALUES(radius),next_index=VALUES(next_index),generated=VALUES(generated),state=VALUES(state),started_ms=VALUES(started_ms)"
                 : "INSERT INTO generation(id,world_name,radius,next_index,generated,state,started_ms) VALUES(1,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET world_name=excluded.world_name,radius=excluded.radius,next_index=excluded.next_index,generated=excluded.generated,state=excluded.state,started_ms=excluded.started_ms";

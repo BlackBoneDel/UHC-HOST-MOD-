@@ -167,7 +167,7 @@ public final class StatsManager {
         UUID id = player.getUniqueId();
         String name = player.getName();
         languageUnconfirmed.add(id);
-        return database.async(connection -> {
+        return database.<Void>async(connection -> {
             ensure(connection, id, name);
             try (PreparedStatement statement = connection.prepareStatement("UPDATE players SET lang=? WHERE uuid=?")) {
                 statement.setString(1, language);
