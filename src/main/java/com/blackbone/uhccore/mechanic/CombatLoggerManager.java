@@ -14,6 +14,7 @@ import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -32,6 +33,7 @@ import org.bukkit.plugin.Plugin;
 /** 10-second monotonic tag; public-API, damageable zombie proxy (not a packet-only illusion). */
 public final class CombatLoggerManager implements Listener {
     private record Tag(long lastHit, UUID attacker) { }
+    private record ChunkRef(World world, int x, int z) { }
     private static final class Proxy {
         final UUID victim;
         final String name;
@@ -39,6 +41,7 @@ public final class CombatLoggerManager implements Listener {
         final ItemStack[] inventory;
         final ItemStack head;
         final ItemStack goldenHead;
+        final ChunkRef chunk;
         final long disconnectedAt;
         UUID lastAttacker;
         Proxy(Player player, Zombie entity, ItemStack goldenHead, UUID lastAttacker) {
@@ -49,6 +52,8 @@ public final class CombatLoggerManager implements Listener {
             SkullMeta meta = (SkullMeta) head.getItemMeta();
             meta.setPlayerProfile(player.getPlayerProfile()); head.setItemMeta(meta);
             this.goldenHead = goldenHead;
+            this.chunk = new ChunkRef(entity.getWorld(), entity.getLocation().getBlockX() >> 4,
+                entity.getLocation().getBlockZ() >> 4);
             this.lastAttacker = lastAttacker;
             disconnectedAt = System.nanoTime();
         }
@@ -68,12 +73,34 @@ public final class CombatLoggerManager implements Listener {
     private final Map<UUID, Map<UUID, Long>> damageLedger = new HashMap<>();
     private final Map<UUID, Proxy> proxies = new HashMap<>();
     private final Map<UUID, UUID> entities = new HashMap<>();
+    // Paper has one plugin ticket per chunk, so proxies in the same chunk must
+    // share it until the last proxy is resolved or reclaimed.
+    private final Map<ChunkRef, Integer> chunkTickets = new HashMap<>();
 
     public CombatLoggerManager(Plugin plugin, Settings settings, UhcGameManager game, GoldenHeadManager heads) {
         this.plugin = plugin; this.settings = settings; this.game = game; this.heads = heads;
     }
 
     public boolean hasProxy(UUID id) { return proxies.containsKey(id); }
+
+    public void forget(UUID id) {
+        tags.remove(id);
+        damageLedger.remove(id);
+    }
+
+    private void retainChunk(ChunkRef chunk) {
+        int holders = chunkTickets.getOrDefault(chunk, 0);
+        if (holders == 0) chunk.world().addPluginChunkTicket(chunk.x(), chunk.z(), plugin);
+        chunkTickets.put(chunk, holders + 1);
+    }
+
+    private void releaseChunk(ChunkRef chunk) {
+        int holders = chunkTickets.getOrDefault(chunk, 0);
+        if (holders <= 1) {
+            chunkTickets.remove(chunk);
+            chunk.world().removePluginChunkTicket(chunk.x(), chunk.z(), plugin);
+        } else chunkTickets.put(chunk, holders - 1);
+    }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void damage(EntityDamageByEntityEvent event) {
@@ -121,7 +148,7 @@ public final class CombatLoggerManager implements Listener {
     @EventHandler(priority = EventPriority.LOWEST)
     public void quit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        if (!game.running() || !game.isAlive(player.getUniqueId())) return;
+        if (!game.running() || !game.isAlive(player.getUniqueId()) || hasProxy(player.getUniqueId())) return;
         Tag tag = tags.get(player.getUniqueId());
         if (tag == null || !CombatWindow.isTagged(tag.lastHit, System.nanoTime())) return;
         Zombie proxy = player.getWorld().spawn(player.getLocation(), Zombie.class, zombie -> {
@@ -144,6 +171,7 @@ public final class CombatLoggerManager implements Listener {
             && java.util.concurrent.ThreadLocalRandom.current().nextDouble() < settings.decimal("mecanicas.golden-heads-probabilidad")
             ? heads.create(player) : null;
         Proxy entry = new Proxy(player, proxy, golden, tag.attacker);
+        retainChunk(entry.chunk);
         proxies.put(entry.victim, entry);
         entities.put(proxy.getUniqueId(), entry.victim);
     }
@@ -154,16 +182,21 @@ public final class CombatLoggerManager implements Listener {
         if (victim == null) return;
         Proxy proxy = proxies.remove(victim);
         event.getDrops().clear(); event.setDroppedExp(0);
-        if (proxy != null) resolve(proxy, true);
+        if (proxy != null) {
+            releaseChunk(proxy.chunk);
+            resolve(proxy, true);
+        }
     }
 
     public void tick() {
         long now = System.nanoTime();
         for (Iterator<Proxy> iterator = proxies.values().iterator(); iterator.hasNext();) {
             Proxy proxy = iterator.next();
-            if (!CombatWindow.proxyExpired(proxy.disconnectedAt, now)) continue;
+            if (proxy.entity.isValid() && !proxy.entity.isDead()
+                && !CombatWindow.proxyExpired(proxy.disconnectedAt, now)) continue;
             iterator.remove();
             entities.remove(proxy.entity.getUniqueId());
+            releaseChunk(proxy.chunk);
             resolve(proxy, settings.string("mecanicas.combat-logger-expiracion").equals("AUTO_DEATH"));
         }
     }
@@ -191,12 +224,16 @@ public final class CombatLoggerManager implements Listener {
             proxy.entity.remove();
             entities.remove(proxy.entity.getUniqueId());
             proxies.remove(player.getUniqueId());
+            releaseChunk(proxy.chunk);
             game.recheckWinner();
         }));
     }
 
     public void close() {
-        for (Proxy proxy : proxies.values()) if (proxy.entity.isValid()) proxy.entity.remove();
+        for (Proxy proxy : proxies.values()) {
+            if (proxy.entity.isValid()) proxy.entity.remove();
+            releaseChunk(proxy.chunk);
+        }
         proxies.clear(); entities.clear(); tags.clear(); damageLedger.clear();
     }
 }

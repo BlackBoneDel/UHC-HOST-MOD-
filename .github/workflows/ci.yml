@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
@@ -32,6 +32,17 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew --no-daemon build 2>&1 | tee build-result.log
+      - name: Verify shaded JAR and both resource packs
+        run: |
+          set -o pipefail
+          python3 scripts/verify_artifacts.py build/libs/uhccore-1.0.0.jar 2>&1 | tee -a build-result.log
+      - uses: actions/upload-artifact@v7
+        if: success()
+        with:
+          name: uhccore-shaded-plugin
+          path: build/libs/uhccore-1.0.0.jar
+          if-no-files-found: error
+          retention-days: 7
       - name: Annotate failed build diagnostics
         if: failure()
         run: |
@@ -42,7 +53,7 @@ jobs:
           message = '\n'.join(lines[-110:])[-14000:]
           print('::error title=Gradle diagnostics::' + message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: verification-reports

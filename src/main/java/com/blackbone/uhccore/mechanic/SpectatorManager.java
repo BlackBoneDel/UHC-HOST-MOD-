@@ -1,5 +1,6 @@
 package com.blackbone.uhccore.mechanic;
 
+import com.blackbone.uhccore.domain.MatchClock;
 import com.blackbone.uhccore.game.UhcGameManager;
 import com.blackbone.uhccore.i18n.LocaleManager;
 import com.destroystokyo.paper.event.player.PlayerPostRespawnEvent;
@@ -66,9 +67,17 @@ public final class SpectatorManager implements Listener {
     }
 
     @EventHandler public void join(PlayerJoinEvent event) {
-        if (event.getPlayer().getGameMode() == GameMode.SPECTATOR) spectatorIds.add(event.getPlayer().getUniqueId());
-        if (!game.isEliminated(event.getPlayer().getUniqueId())) return;
-        Bukkit.getScheduler().runTask(plugin, () -> { if (event.getPlayer().isOnline()) equip(event.getPlayer()); });
+        Player player = event.getPlayer();
+        UUID id = player.getUniqueId();
+        if (player.getGameMode() == GameMode.SPECTATOR) spectatorIds.add(id);
+        if (!spectatorOnJoin(id)) return;
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isOnline() && spectatorOnJoin(id)) equip(player);
+        });
+    }
+
+    private boolean spectatorOnJoin(UUID id) {
+        return game.isEliminated(id) || (game.state() != MatchClock.State.IDLE && !game.isAlive(id));
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

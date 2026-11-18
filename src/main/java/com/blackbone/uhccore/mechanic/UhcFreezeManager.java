@@ -47,7 +47,11 @@ public final class UhcFreezeManager implements Listener {
     }
 
     public boolean freeze(Player player, Player staff) {
-        return frozen.putIfAbsent(player.getUniqueId(), new Frozen(player.getName(), staff.getUniqueId(), Instant.now())) == null;
+        return freeze(player, staff.getUniqueId());
+    }
+
+    public boolean freeze(Player player, UUID staffId) {
+        return frozen.putIfAbsent(player.getUniqueId(), new Frozen(player.getName(), staffId, Instant.now())) == null;
     }
 
     public boolean unfreeze(UUID id) { return frozen.remove(id) != null; }

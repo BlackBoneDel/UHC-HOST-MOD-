@@ -8,10 +8,11 @@ Core GPL-3.0 para **una sola partida/mundo activo**, compilado contra Paper **26
 ./gradlew test
 ./gradlew pitest
 ./gradlew build
+python3 scripts/verify_artifacts.py build/libs/uhccore-1.0.0.jar
 # JAR de despliegue: build/libs/uhccore-1.0.0.jar
 ```
 
-Coloca el JAR sombreado en `plugins/` de Paper 26.3, build estable ≥175. Inicia y detén el servidor para generar `plugins/UhcCore/{settings.yml,database.yml,ranks.yml,lang/}`. `database.yml` usa SQLite por defecto, sin configuración. Para MySQL, edita `database.yml` antes de reiniciar; si falla el primer contacto, se registra un `WARNING` y se conserva el servicio con SQLite. **Nunca restaures una copia MySQL suponiendo que el SQLite de emergencia contiene sus datos.**
+La CI ejecuta las tres fases y comprueba el JAR sombreado, las librerías reubicadas, los binarios JNI de SQLite y ambos packs ZIP; publica el JAR como artefacto de la ejecución. Colócalo en `plugins/` de Paper 26.3 (build estable ≥200). Inicia y detén el servidor para generar `plugins/UhcCore/{settings.yml,database.yml,ranks.yml,lang/}`. `database.yml` usa SQLite por defecto, sin configuración. Para MySQL, edita `database.yml` antes de reiniciar; si falla el primer contacto, se registra un `WARNING` y se conserva el servicio con SQLite. **Nunca restaures una copia MySQL suponiendo que el SQLite de emergencia contiene sus datos.**
 
 El servidor HTTP para packs enlaza `0.0.0.0:8088` por defecto. Abre el puerto y establece `resource-pack.host-publico` en el DNS/IP accesible por los clientes. El intento de detectar una IP local sin configuración no garantiza acceso desde Internet. Un cortafuegos, NAT o proxy inverso debe enrutar el puerto; `url-externa` solo se usa explícitamente como fallback cuando el microservidor no se puede iniciar. El pack es obligatorio. Véase [compatibilidad](docs/compatibilidad.md) para packs legacy y ViaBackwards.
 
@@ -35,7 +36,7 @@ El servidor HTTP para packs enlaza `0.0.0.0:8088` por defecto. Abre el puerto y 
 
 En staff: clic izquierdo sobre cabeza = TP (un participante vivo no puede staff-teleportarse); derecho = acciones; Shift = freeze; medio = inspección. Inventario y ender chest se copian en vistas inmutables, nunca se abren para editar. Expulsión requiere dos clics en ≤10s. Los jugadores congelados solo pueden escribir `/msg` a staff; su chat se muestra con prefijo `[Frozen]` dentro del canal correspondiente. Su salida avisa de inmediato a staff con hora UTC exacta.
 
-En mecánicas, las fases de borde usan botones ± radio, Shift ± inicio, medio + duración y Q para eliminar. No se pueden editar reglas mientras la partida está en curso. `AUTO_DEATH` asigna la kill del combat logger al último atacante; `FORFEIT` elimina sin asignación de kill. Ambos evitan ganadores offline indefinidos. La ventana de daño (10s) y la permanencia del proxy (otros 10s tras salir) son fijas y no editables.
+En mecánicas, las fases de borde usan botones ± radio, Shift ± inicio, medio + duración y Q para eliminar. No se pueden editar reglas mientras la partida está en curso. `/uhc start` exige al menos dos participantes con perfiles ya cargados y una pre-generación completada o cancelada; no inicia con un checkpoint pendiente o pausado. La fase previa inmoviliza y protege a los participantes y bloquea a terceros en el mundo de partida. Si falla el scatter o se detiene el plugin durante la cuenta atrás, se restauran posiciones, inventarios, Ender chests, efectos y estado previo de los participantes conectados. En cuanto comienza la partida, esos inventarios anteriores quedan eliminados deliberadamente. `AUTO_DEATH` asigna la kill del combat logger al último atacante; `FORFEIT` elimina sin asignación de kill. Ambos evitan ganadores offline indefinidos. La ventana de daño (10s) y la permanencia del proxy (otros 10s tras salir) son fijas y no editables.
 
 ## Arquitectura y trazabilidad
 
@@ -49,7 +50,9 @@ En mecánicas, las fases de borde usan botones ± radio, Shift ± inicio, medio 
 | 9, 14 | `PregenerationManager` (hasta 4 solicitudes async, checkpoint contiguo transaccional), `MatchClock` (partida única) |
 | 11–13 | `RankManager`/`UhcPermissible` delegan en Bukkit/LuckPerms, `LocaleManager` es/en, `ProxyBridge` usa plugin messaging estándar |
 
-**Límites operativos:** las lecturas de bloques, GUI y mutaciones Bukkit corren en el hilo principal. La generación usa `World#getChunkAtAsync`, los teletransportes `teleportAsync`; la base de datos y webhooks usan workers limitados. No hay una tarea repetitiva por jugador. El proxy de combate es un **zombie inmóvil, visible y dañable** con inventario retenido, no un jugador falso de NMS; la hitbox es la de ese proxy, por lo que conviene probar su comportamiento en tu entorno de liga antes de desplegar. Las configuraciones de reglas se fijan al inicio de cada partida; cambios posteriores solo se admiten tras el resultado.
+**Límites operativos:** las lecturas de bloques, GUI y mutaciones Bukkit corren en el hilo principal. La generación usa `World#getChunkAtAsync`, los teletransportes `teleportAsync`; la base de datos y webhooks usan workers limitados. No hay una tarea repetitiva por jugador. El mundo UHC fuerza regeneración natural desactivada, PvP activado y respawn inmediato. El proxy de combate es un **zombie inmóvil, visible y dañable** con inventario retenido y ticket de chunk compartido, no un jugador falso de NMS; su hitbox es la de ese proxy, por lo que conviene probar su comportamiento en tu entorno de liga antes de desplegar. Las configuraciones de reglas se fijan al inicio de cada partida; cambios posteriores solo se admiten tras el resultado.
+
+**Operación competitiva:** `reset` permite otra partida, pero **no regenera el terreno ni limpia cofres/bloques del mundo anterior**. Para otra partida oficial, detén Paper, crea un mundo UHC nuevo (o elimina el mundo anterior con respaldo) y vuelve a pre-generarlo antes de iniciar. Un reinicio de Paper durante una partida activa **no reanuda** esa partida en memoria: coordina reinicios únicamente entre partidas. Los datos de perfiles, reportes y checkpoints de pre-generación sí se guardan en la base de datos. Se recomienda mantener backups de mundo y base de datos sincronizados.
 
 ## Árbol del proyecto
 
@@ -93,6 +96,8 @@ En mecánicas, las fases de borde usan botones ± radio, Shift ± inicio, medio 
 │   │   │           └── negative_space.json
 │   │   └── pack.mcmeta
 │   └── pack.mcmeta
+├── scripts/
+│   └── verify_artifacts.py
 ├── src/
 │   ├── main/
 │   │   ├── java/
@@ -111,6 +116,7 @@ En mecánicas, las fases de borde usan botones ± radio, Shift ± inicio, medio 
 │   │   │               │   ├── BorderPhase.java
 │   │   │               │   ├── BorderSchedule.java
 │   │   │               │   ├── CombatWindow.java
+│   │   │               │   ├── MatchAccessPolicy.java
 │   │   │               │   ├── MatchClock.java
 │   │   │               │   ├── PlayerStats.java
 │   │   │               │   ├── ProtocolPolicy.java
@@ -136,6 +142,7 @@ En mecánicas, las fases de borde usan botones ± radio, Shift ± inicio, medio 
 │   │   │               ├── mechanic/
 │   │   │               │   ├── CombatLoggerManager.java
 │   │   │               │   ├── GoldenHeadManager.java
+│   │   │               │   ├── MatchProtection.java
 │   │   │               │   ├── MuteManager.java
 │   │   │               │   ├── RandomKillerManager.java
 │   │   │               │   ├── SpectatorManager.java
@@ -177,16 +184,20 @@ En mecánicas, las fases de borde usan botones ± radio, Shift ± inicio, medio 
 │                       ├── domain/
 │                       │   ├── BorderScheduleTest.java
 │                       │   ├── CombatWindowTest.java
+│                       │   ├── MatchAccessPolicyTest.java
 │                       │   ├── MatchClockTest.java
 │                       │   ├── PlayerStatsTest.java
 │                       │   ├── ProtocolPolicyTest.java
 │                       │   ├── RatingMathTest.java
 │                       │   └── ScatterRulesTest.java
-│                       └── mechanic/
-│                           ├── PersistenceTest.java
-│                           ├── RandomKillerManagerTest.java
-│                           ├── RankManagerTest.java
-│                           └── UhcFreezeManagerTest.java
+│                       ├── mechanic/
+│                       │   ├── PersistenceTest.java
+│                       │   ├── RandomKillerManagerTest.java
+│                       │   ├── RankManagerTest.java
+│                       │   └── UhcFreezeManagerTest.java
+│                       └── world/
+│                           ├── PregenerationCheckpointTest.java
+│                           └── WorldManagerTest.java
 ├── .gitignore
 ├── build.gradle.kts
 ├── gradle.properties

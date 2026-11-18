@@ -26,11 +26,14 @@ public final class ViaVersionBridge {
         this.plugin = plugin;
         this.settings = settings;
         this.locales = locales;
-        via = Bukkit.getPluginManager().getPlugin("ViaVersion") != null;
-        backwards = Bukkit.getPluginManager().getPlugin("ViaBackwards") != null;
+        Plugin viaPlugin = Bukkit.getPluginManager().getPlugin("ViaVersion");
+        Plugin backwardsPlugin = Bukkit.getPluginManager().getPlugin("ViaBackwards");
+        via = viaPlugin != null && viaPlugin.isEnabled();
+        backwards = backwardsPlugin != null && backwardsPlugin.isEnabled();
         nativeProtocol = Bukkit.getUnsafe().getProtocolVersion();
-        if (nativeProtocol < 777) throw new IllegalStateException("Paper 26.3 (protocol 777) is required");
-        ProtocolPolicy.Mode requested = ProtocolPolicy.Mode.valueOf(settings.string("compatibilidad.modo"));
+        if (nativeProtocol != 777) throw new IllegalStateException("Paper 26.3 (protocol 777) is required");
+        ProtocolPolicy.Mode requested = ProtocolPolicy.Mode.valueOf(
+            settings.string("compatibilidad.modo").toUpperCase(java.util.Locale.ROOT));
         if (!via && requested == ProtocolPolicy.Mode.FLEXIBLE) {
             plugin.getLogger().warning("ViaVersion absent: forcing ranked strict mode");
             requested = ProtocolPolicy.Mode.ESTRICTO;

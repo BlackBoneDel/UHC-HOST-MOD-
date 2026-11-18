@@ -78,8 +78,12 @@ public final class InfoPanel implements Listener {
     }
 
     private void personal(Player player, Inventory inventory) {
-        PlayerStats profile = stats.get(player.getUniqueId(), player.getName());
         inventory.setItem(10, GuiItems.head(player, locales.text(player, "info.profile", "player", player.getName())));
+        if (!stats.ready(player.getUniqueId())) {
+            inventory.setItem(22, GuiItems.item(Material.CLOCK, locales.text(player, "info.profile-loading")));
+            return;
+        }
+        PlayerStats profile = stats.get(player.getUniqueId(), player.getName());
         inventory.setItem(19, GuiItems.item(Material.IRON_SWORD, locales.text(player, "info.kills", "value", String.valueOf(profile.kills()))));
         inventory.setItem(20, GuiItems.item(Material.SKELETON_SKULL, locales.text(player, "info.deaths", "value", String.valueOf(profile.deaths()))));
         inventory.setItem(21, GuiItems.item(Material.BOW, locales.text(player, "info.assists", "value", String.valueOf(profile.assists()))));

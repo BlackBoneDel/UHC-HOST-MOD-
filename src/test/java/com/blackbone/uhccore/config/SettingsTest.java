@@ -30,6 +30,18 @@ class SettingsTest {
         assertEquals(2, reloaded.borderSchedule().phases().size());
     }
 
+    @Test void rejectsDangerousWorldOrRatingLimitsBeforeEnabling() throws Exception {
+        Settings config = settings();
+        config.set("mundo.nombre", "../other-world");
+        assertThrows(IllegalArgumentException.class, config::validate);
+        config.set("mundo.nombre", "uhc_world");
+        config.set("mundo.radio", 20001);
+        assertThrows(IllegalArgumentException.class, config::validate);
+        config.set("mundo.radio", 1200);
+        config.set("mecanicas.random-killer-recompensa-elo", -1);
+        assertThrows(IllegalArgumentException.class, config::validate);
+    }
+
     @Test void clampedProtocolFloorAndStrictRangePersist() throws Exception {
         Settings config = settings();
         config.set("compatibilidad.protocolo-minimo", 10);

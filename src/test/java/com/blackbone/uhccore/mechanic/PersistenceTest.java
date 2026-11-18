@@ -32,10 +32,35 @@ class PersistenceTest {
         MockBukkit.unmock();
     }
 
+    @Test void earlyHudReadCannotReplaceAStoredProfile() throws Exception {
+        var alice = server.addPlayer("Alice");
+        var plugin = MockBukkit.createMockPlugin();
+        var locales = new com.blackbone.uhccore.i18n.LocaleManager(Path.of("src/main/resources/lang").toFile());
+        StatsManager first = new StatsManager(database, plugin, locales);
+        first.participation(List.of(alice));
+        first.victory(alice.getUniqueId(), alice.getName());
+        first.leaderboard(10).join(); // all writes have committed before the new session
+
+        StatsManager reconnect = new StatsManager(database, plugin, locales);
+        assertEquals(1000, reconnect.get(alice.getUniqueId(), alice.getName()).elo());
+        assertFalse(reconnect.ready(alice.getUniqueId()));
+        reconnect.join(alice, profile -> { });
+        for (int i = 0; i < 300 && !reconnect.ready(alice.getUniqueId()); i++) {
+            Thread.sleep(5);
+            server.getScheduler().performOneTick();
+        }
+        assertTrue(reconnect.ready(alice.getUniqueId()));
+        assertEquals(1032, reconnect.get(alice.getUniqueId(), alice.getName()).elo());
+        assertEquals(1, reconnect.get(alice.getUniqueId(), alice.getName()).played());
+        reconnect.leave(alice, false);
+        assertFalse(reconnect.ready(alice.getUniqueId()));
+    }
+
     @Test void recordsStatsReportsAndRatingsWithoutARealServer() {
         var alice = server.addPlayer("Alice");
         var bob = server.addPlayer("Bob");
-        StatsManager stats = new StatsManager(database, MockBukkit.createMockPlugin());
+        StatsManager stats = new StatsManager(database, MockBukkit.createMockPlugin(),
+            new com.blackbone.uhccore.i18n.LocaleManager(Path.of("src/main/resources/lang").toFile()));
         stats.participation(List.of(alice, bob));
         stats.death(bob.getUniqueId(), bob.getName(), alice.getUniqueId(), alice.getName(), Set.of(), 15);
         stats.victory(alice.getUniqueId(), alice.getName());

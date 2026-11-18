@@ -13,6 +13,10 @@ public record PlayerStats(UUID uuid, String name, int kills, int deaths, int ass
         return new PlayerStats(uuid, name, 0, 0, 0, 0, 0, RatingMath.INITIAL_ELO);
     }
 
+    public PlayerStats renamed(String currentName) {
+        return new PlayerStats(uuid, currentName, kills, deaths, assists, wins, played, elo);
+    }
+
     public PlayerStats participation() {
         return new PlayerStats(uuid, name, kills, deaths, assists, wins, played + 1, elo);
     }

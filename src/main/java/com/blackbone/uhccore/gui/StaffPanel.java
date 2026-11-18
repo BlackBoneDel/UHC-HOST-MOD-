@@ -117,19 +117,23 @@ public final class StaffPanel implements Listener {
 
     public void reportQueue(Player staff) {
         if (!allowed(staff)) return;
-        reports.pending().thenAccept(rows -> Bukkit.getScheduler().runTask(plugin, () -> {
-            if (!staff.isOnline() || !staff.hasPermission("uhccore.staff")) return;
-            Holder holder = holder(staff, View.REPORTS, 54, 0, null, List.of(), rows, "staff.reports");
-            for (int i = 0; i < rows.size(); i++) {
-                ReportManager.Report report = rows.get(i);
-                holder.inventory.setItem(i, GuiItems.item(Material.PAPER,
-                    locales.text(staff, "staff.report-entry", "id", String.valueOf(report.id())),
-                    locales.text(staff, "staff.report-target", "target", report.target().toString()),
-                    Component.text(report.reason(), GuiItems.MUTED), locales.text(staff, "staff.resolve")));
-            }
-            holder.inventory.setItem(53, GuiItems.item(Material.ARROW, locales.text(staff, "menu.back")));
-            staff.openInventory(holder.inventory);
-        }));
+        reports.pending().whenComplete((rows, error) -> {
+            if (!plugin.isEnabled()) return;
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (!staff.isOnline() || !staff.hasPermission("uhccore.staff")) return;
+                if (error != null) { locales.send(staff, "staff.report-error"); return; }
+                Holder holder = holder(staff, View.REPORTS, 54, 0, null, List.of(), rows, "staff.reports");
+                for (int i = 0; i < rows.size(); i++) {
+                    ReportManager.Report report = rows.get(i);
+                    holder.inventory.setItem(i, GuiItems.item(Material.PAPER,
+                        locales.text(staff, "staff.report-entry", "id", String.valueOf(report.id())),
+                        locales.text(staff, "staff.report-target", "target", report.target().toString()),
+                        Component.text(report.reason(), GuiItems.MUTED), locales.text(staff, "staff.resolve")));
+                }
+                holder.inventory.setItem(53, GuiItems.item(Material.ARROW, locales.text(staff, "menu.back")));
+                staff.openInventory(holder.inventory);
+            });
+        });
     }
 
     @EventHandler public void click(InventoryClickEvent event) {
@@ -155,8 +159,14 @@ public final class StaffPanel implements Listener {
         if (holder.view == View.REPORTS) {
             if (slot == 53) { hub(staff, 0); return; }
             if (slot >= holder.reports.size()) return;
-            reports.resolve(holder.reports.get(slot).id()).thenAccept(ok -> Bukkit.getScheduler().runTask(plugin,
-                () -> { if (staff.isOnline()) reportQueue(staff); }));
+            reports.resolve(holder.reports.get(slot).id()).whenComplete((ok, error) -> {
+                if (!plugin.isEnabled()) return;
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (!staff.isOnline()) return;
+                    if (error != null) locales.send(staff, "staff.report-error");
+                    else reportQueue(staff);
+                });
+            });
             return;
         }
         if (slot == 53 && (holder.view == View.INVENTORY || holder.view == View.ENDER)) {

@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
@@ -47,7 +48,7 @@ public final class RankManager implements UhcPermissible {
         player.recalculatePermissions();
     }
 
-    public void setRank(Player player, String rank) {
+    public CompletableFuture<Void> setRank(Player player, String rank) {
         if (!fallback || !rankNames().contains(rank)) throw new IllegalArgumentException("Rank unavailable");
         UUID uuid = player.getUniqueId();
         PermissionAttachment old = attachments.remove(uuid);
@@ -57,9 +58,13 @@ public final class RankManager implements UhcPermissible {
         attachments.put(uuid, attachment);
         apply(attachment, rank, new HashSet<>());
         player.recalculatePermissions();
-        database.async(connection -> {
-            try (PreparedStatement statement = connection.prepareStatement("UPDATE players SET rank_name=? WHERE uuid=?")) {
-                statement.setString(1, rank); statement.setString(2, uuid.toString());
+        String name = player.getName();
+        return database.async(connection -> {
+            String sql = database.driver().equals("mysql")
+                ? "INSERT INTO players(uuid,name,rank_name) VALUES(?,?,?) ON DUPLICATE KEY UPDATE name=VALUES(name),rank_name=VALUES(rank_name)"
+                : "INSERT INTO players(uuid,name,rank_name) VALUES(?,?,?) ON CONFLICT(uuid) DO UPDATE SET name=excluded.name,rank_name=excluded.rank_name";
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, uuid.toString()); statement.setString(2, name); statement.setString(3, rank);
                 statement.executeUpdate();
             }
             return null;

@@ -21,6 +21,7 @@ command:
   top-entry: '<gray>#<position></gray> <aqua><player></aqua> <gold><elo> Elo</gold>'
   rank-usage: '<yellow>Uso: /uhc rank <jugador> <rango></yellow>'
   rank-set: '<green>Rango de <player>: <rank>.</green>'
+  persistence-error: '<red>No se pudo guardar o consultar la base de datos. Contacta al administrador.</red>'
 compat:
   kick: '<red>Versión incompatible (<actual>). Permitidas: <minimum> a <maximum>. Instala el cliente correcto.</red>'
 pack:
@@ -82,6 +83,7 @@ info:
   elapsed: '<gray>Tiempo transcurrido: <seconds>s</gray>'
   phase: '<gray>Fase de borde: <index></gray>'
   profile: '<aqua>Estadísticas de <player></aqua>'
+  profile-loading: '<yellow>Cargando estadísticas...</yellow>'
   kills: '<red>Kills: <value></red>'
   deaths: '<gray>Muertes: <value></gray>'
   assists: '<aqua>Asistencias: <value></aqua>'
@@ -100,6 +102,7 @@ staff:
   freeze: '<aqua>Congelar</aqua>'
   unfreeze: '<green>Descongelar</green>'
   frozen-confirm: '<aqua>Has congelado a <player>.</aqua>'
+  already-frozen: '<gray><player> ya estaba congelado.</gray>'
   frozen-self: '<red>Has sido congelado por staff. Usa /msg para contactar con staff.</red>'
   unfrozen: '<green>Has descongelado a <player>.</green>'
   unfrozen-self: '<green>Ya no estás congelado.</green>'
@@ -120,6 +123,7 @@ staff:
   muted-message: '<red>El staff ha silenciado tu chat.</red>'
   offline: '<red>Jugador desconectado.</red>'
   reports: '<aqua>Reportes pendientes</aqua>'
+  report-error: '<red>No se pudo consultar o actualizar la cola de reportes.</red>'
   report-entry: '<yellow>Reporte #<id></yellow>'
   report-target: '<gray>Objetivo: <target></gray>'
   resolve: '<green>Clic: marcar como revisado</green>'
@@ -135,7 +139,10 @@ mechanic:
   random-killer: '<red>☠ Cazador designado: <player></red>'
   timebomb-warning: '<red>☄ ¡TimeBomb en <seconds>s!</red>'
 match:
-  generating: '<red>Pausa o termina la pre-generación antes de iniciar una partida.</red>'
+  profile-unavailable: '<red>No se pudo cargar tu perfil. Contacta al staff e inténtalo de nuevo.</red>'
+  profiles-loading: '<yellow>Se están cargando los perfiles de los participantes. Vuelve a intentarlo en unos segundos.</yellow>'
+  restoring: '<yellow>Restaurando el estado de pre-generación. Vuelve a intentarlo en unos segundos.</yellow>'
+  generating: '<red>Completa o cancela la pre-generación antes de iniciar una partida.</red>'
   already-active: '<red>Solo puede haber una partida a la vez. Espera al final y usa /uhc reset.</red>'
   pregame: '<yellow>Pre-game: <seconds> segundos. Scatter en curso.</yellow>'
   scatter-failed: '<red>Scatter cancelado: no se encontraron posiciones seguras.</red>'

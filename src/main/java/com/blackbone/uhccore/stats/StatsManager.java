@@ -3,6 +3,7 @@ package com.blackbone.uhccore.stats;
 import com.blackbone.uhccore.db.Database;
 import com.blackbone.uhccore.domain.PlayerStats;
 import com.blackbone.uhccore.domain.RatingMath;
+import com.blackbone.uhccore.i18n.LocaleManager;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -11,10 +12,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.logging.Level;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
@@ -23,11 +26,26 @@ import org.bukkit.plugin.Plugin;
 public final class StatsManager {
     private final Database database;
     private final Plugin plugin;
+    private final LocaleManager locales;
     private final Map<UUID, PlayerStats> cache = new ConcurrentHashMap<>();
+    private final Set<UUID> ready = ConcurrentHashMap.newKeySet();
 
-    public StatsManager(Database database, Plugin plugin) {
+    public StatsManager(Database database, Plugin plugin, LocaleManager locales) {
         this.database = database;
         this.plugin = plugin;
+        this.locales = locales;
+    }
+
+    public boolean ready(UUID uuid) { return ready.contains(uuid); }
+
+    public void leave(Player player, boolean retainForProxy) {
+        UUID uuid = player.getUniqueId();
+        ready.remove(uuid);
+        if (!retainForProxy) cache.remove(uuid);
+    }
+
+    public void discardOffline() {
+        cache.keySet().removeIf(uuid -> Bukkit.getPlayer(uuid) == null);
     }
 
     public record Profile(PlayerStats stats, String language, String rank) { }
@@ -35,6 +53,7 @@ public final class StatsManager {
     public void join(Player player, Consumer<Profile> loaded) {
         UUID uuid = player.getUniqueId();
         String name = player.getName();
+        ready.remove(uuid);
         database.async(connection -> {
             ensure(connection, uuid, name);
             try (PreparedStatement statement = connection.prepareStatement("SELECT * FROM players WHERE uuid=?")) {
@@ -44,15 +63,33 @@ public final class StatsManager {
                     return new Profile(fromRow(rows), rows.getString("lang"), rows.getString("rank_name"));
                 }
             }
-        }).thenAccept(profile -> Bukkit.getScheduler().runTask(plugin, () -> {
-            if (!player.isOnline()) return;
-            cache.putIfAbsent(uuid, profile.stats());
-            loaded.accept(profile);
-        }));
+        }).whenComplete((profile, error) -> {
+            if (!plugin.isEnabled()) return;
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (!player.isOnline()) return;
+                if (error != null) {
+                    plugin.getLogger().log(Level.SEVERE, "Unable to load player profile " + uuid, error);
+                    player.kick(locales.text(player, "match.profile-unavailable"));
+                    return;
+                }
+                try {
+                    // A HUD query before the async SELECT must not insert a fresh
+                    // 1000-Elo profile and later overwrite historical match data.
+                    // Retained proxy scores are newer than a concurrent DB read.
+                    cache.merge(uuid, profile.stats(), (current, ignored) -> current.renamed(name));
+                    loaded.accept(profile);
+                    ready.add(uuid);
+                } catch (RuntimeException ex) {
+                    plugin.getLogger().log(Level.SEVERE, "Unable to initialize player profile " + uuid, ex);
+                    player.kick(locales.text(player, "match.profile-unavailable"));
+                }
+            });
+        });
     }
 
     public PlayerStats get(UUID uuid, String name) {
-        return cache.computeIfAbsent(uuid, id -> PlayerStats.fresh(id, name));
+        PlayerStats current = cache.get(uuid);
+        return current == null ? PlayerStats.fresh(uuid, name) : current;
     }
 
     public void participation(Collection<Player> players) {
@@ -99,10 +136,10 @@ public final class StatsManager {
         persist(List.of(stats));
     }
 
-    public void language(Player player, String language) {
+    public CompletableFuture<Void> language(Player player, String language) {
         UUID id = player.getUniqueId();
         String name = player.getName();
-        database.async(connection -> {
+        return database.async(connection -> {
             ensure(connection, id, name);
             try (PreparedStatement statement = connection.prepareStatement("UPDATE players SET lang=? WHERE uuid=?")) {
                 statement.setString(1, language);

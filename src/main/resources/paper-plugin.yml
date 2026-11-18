@@ -5,8 +5,7 @@ api-version: '26.3'
 description: Core de UHC competitivo, una partida activa por servidor
 author: BlackBoneDel
 load: POSTWORLD
-# Paper uses dependencies.server for soft dependencies; the legacy key is documentary.
-softdepend: [ViaVersion, LuckPerms]
+# Optional Paper server dependencies load before UhcCore; ViaVersion shares its API classpath.
 dependencies:
   server:
     ViaVersion:

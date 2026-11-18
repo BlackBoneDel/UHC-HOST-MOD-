@@ -40,6 +40,15 @@ class RankManagerTest {
         manager.setRank(player, "staff");
         assertTrue(manager.hasPermission(player, "uhccore.play"));
         assertTrue(manager.hasPermission(player, "uhccore.staff.notify"));
+        assertEquals("staff", database.async(connection -> {
+            try (var stmt = connection.prepareStatement("SELECT rank_name FROM players WHERE uuid=?")) {
+                stmt.setString(1, player.getUniqueId().toString());
+                try (var rows = stmt.executeQuery()) {
+                    assertTrue(rows.next());
+                    return rows.getString(1);
+                }
+            }
+        }).join());
         assertThrows(IllegalArgumentException.class, () -> manager.setRank(player, "ghost"));
         manager.leave(player);
         assertFalse(manager.hasPermission(player, "uhccore.staff.notify"));

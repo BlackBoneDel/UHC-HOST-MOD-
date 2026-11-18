@@ -2,7 +2,7 @@
 
 ## Política competitiva
 
-El servidor **siempre ejecuta Paper 26.3+** (Java 25); el protocolo nativo se obtiene de `Bukkit.getUnsafe().getProtocolVersion()` (777 en 26.3). ViaVersion solo traduce **paquetes**: no añade bloques, objetos ni mecánicas al servidor. La partida oficial usa `ESTRICTO`: protocolo del cliente **exactamente igual al nativo**. Esto minimiza discrepancias de hitbox, movimiento y timing. Ninguna opción de configuración de ViaVersion se modifica: UhcCore aplica sus reglas en su propio `settings.yml` y expulsa clientes no permitidos tras el cuarto tick del join.
+El servidor **ejecuta Paper 26.3** (Java 25); el protocolo nativo se obtiene de `Bukkit.getUnsafe().getProtocolVersion()` y debe ser exactamente 777. Una futura versión de Paper con otro protocolo requiere adaptar el pack y volver a verificar el Core antes de habilitarla. ViaVersion solo traduce **paquetes**: no añade bloques, objetos ni mecánicas al servidor. La partida oficial usa `ESTRICTO`: protocolo del cliente **exactamente igual al nativo**. Esto minimiza discrepancias de hitbox, movimiento y timing. Ninguna opción de configuración de ViaVersion se modifica: UhcCore aplica sus reglas en su propio `settings.yml` y expulsa clientes no permitidos tras el cuarto tick del join.
 
 | Modo | ViaVersion | ViaBackwards | Rango aceptado |
 |---|---|---|---|

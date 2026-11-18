@@ -21,6 +21,7 @@ command:
   top-entry: '<gray>#<position></gray> <aqua><player></aqua> <gold><elo> Elo</gold>'
   rank-usage: '<yellow>Usage: /uhc rank <player> <rank></yellow>'
   rank-set: '<green>Rank for <player>: <rank>.</green>'
+  persistence-error: '<red>Database operation failed. Contact an administrator.</red>'
 compat:
   kick: '<red>Unsupported client version (<actual>). Allowed: <minimum> to <maximum>. Use a supported client.</red>'
 pack:
@@ -82,6 +83,7 @@ info:
   elapsed: '<gray>Elapsed: <seconds>s</gray>'
   phase: '<gray>Border phase: <index></gray>'
   profile: '<aqua>Stats for <player></aqua>'
+  profile-loading: '<yellow>Loading statistics...</yellow>'
   kills: '<red>Kills: <value></red>'
   deaths: '<gray>Deaths: <value></gray>'
   assists: '<aqua>Assists: <value></aqua>'
@@ -100,6 +102,7 @@ staff:
   freeze: '<aqua>Freeze</aqua>'
   unfreeze: '<green>Unfreeze</green>'
   frozen-confirm: '<aqua>Froze <player>.</aqua>'
+  already-frozen: '<gray><player> is already frozen.</gray>'
   frozen-self: '<red>Staff froze you. Use /msg to contact staff.</red>'
   unfrozen: '<green>Unfroze <player>.</green>'
   unfrozen-self: '<green>You are no longer frozen.</green>'
@@ -120,6 +123,7 @@ staff:
   muted-message: '<red>Staff muted your chat.</red>'
   offline: '<red>Player disconnected.</red>'
   reports: '<aqua>Pending reports</aqua>'
+  report-error: '<red>Could not read or update the report queue.</red>'
   report-entry: '<yellow>Report #<id></yellow>'
   report-target: '<gray>Target: <target></gray>'
   resolve: '<green>Click: mark as reviewed</green>'
@@ -135,7 +139,10 @@ mechanic:
   random-killer: '<red>☠ Designated hunter: <player></red>'
   timebomb-warning: '<red>☄ TimeBomb in <seconds>s!</red>'
 match:
-  generating: '<red>Pause or finish pre-generation before starting a match.</red>'
+  profile-unavailable: '<red>Your profile could not be loaded. Contact staff and try again.</red>'
+  profiles-loading: '<yellow>Participant profiles are still loading. Try again in a few seconds.</yellow>'
+  restoring: '<yellow>Restoring the pre-generation checkpoint. Try again in a few seconds.</yellow>'
+  generating: '<red>Complete or cancel pre-generation before starting a match.</red>'
   already-active: '<red>Only one match may run at a time. Wait for the result and use /uhc reset.</red>'
   pregame: '<yellow>Pre-game: <seconds> seconds. Scattering players.</yellow>'
   scatter-failed: '<red>Scatter cancelled: safe locations could not be found.</red>'

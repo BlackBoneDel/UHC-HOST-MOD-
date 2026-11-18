@@ -68,8 +68,20 @@ public final class Settings {
     }
 
     public void validate() {
-        if (integer("mundo.radio") < 128 || integer("pre-game-seconds") < 0 || integer("mundo.min-distancia-scatter") < 16) {
+        int radius = integer("mundo.radio");
+        int separation = integer("mundo.min-distancia-scatter");
+        if (radius < 128 || radius > 20000 || integer("pre-game-seconds") < 0
+            || integer("pre-game-seconds") > 600 || separation < 16
+            || separation > 2 * (radius - 32)) {
             throw new IllegalArgumentException("World radius, scatter separation or pregame duration is invalid");
+        }
+        String worldName = string("mundo.nombre");
+        if (worldName.isBlank() || worldName.contains("/") || worldName.contains("\\")
+            || worldName.equals("..") || worldName.equals(".")) {
+            throw new IllegalArgumentException("Unsafe UHC world name");
+        }
+        if (integer("mecanicas.random-killer-recompensa-elo") < 0) {
+            throw new IllegalArgumentException("Random killer Elo reward cannot be negative");
         }
         if (decimal("mecanicas.golden-heads-probabilidad") < 0 || decimal("mecanicas.golden-heads-probabilidad") > 1) {
             throw new IllegalArgumentException("Golden head chance must be in [0,1]");

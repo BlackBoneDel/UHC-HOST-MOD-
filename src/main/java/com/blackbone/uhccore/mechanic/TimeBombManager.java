@@ -27,7 +27,9 @@ public final class TimeBombManager {
     public TimeBombManager(Settings settings, LocaleManager locales) { this.settings = settings; this.locales = locales; }
 
     public void create(String name, Location location, ItemStack skull, List<ItemStack> loot, int experience) {
-        List<ItemStack> copy = loot.stream().filter(item -> item != null && !item.getType().isAir()).map(ItemStack::clone).toList();
+        List<ItemStack> copy = new ArrayList<>(loot.stream()
+            .filter(item -> item != null && !item.getType().isAir()).map(ItemStack::clone).toList());
+        if (skull != null && !skull.getType().isAir()) copy.add(skull.clone());
         if (!settings.bool("mecanicas.timebomb")) {
             release(location, copy, experience); return;
         }

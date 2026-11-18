@@ -23,10 +23,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
+import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -40,9 +42,69 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.Material;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.potion.PotionEffect;
 
 /** One active match; rules and participants are snapshotted before scatter. */
 public final class UhcGameManager implements Listener {
+    public static final class ProfilesLoadingException extends IllegalStateException { }
+
+    /** A failed scatter or shutdown during the countdown must not destroy lobby inventories. */
+    private static final class PregamePlayer {
+        final Location origin;
+        final ItemStack[] inventory;
+        final ItemStack[] enderChest;
+        final List<PotionEffect> effects;
+        final GameMode mode;
+        final double health;
+        final double absorption;
+        final int food;
+        final float saturation;
+        final int level;
+        final float experience;
+        final int fireTicks;
+        final int freezeTicks;
+        final float fallDistance;
+        final int air;
+        final int noDamageTicks;
+
+        PregamePlayer(Player player) {
+            origin = player.getLocation().clone();
+            inventory = copy(player.getInventory().getContents());
+            enderChest = copy(player.getEnderChest().getContents());
+            effects = List.copyOf(player.getActivePotionEffects());
+            mode = player.getGameMode();
+            health = player.getHealth(); absorption = player.getAbsorptionAmount();
+            food = player.getFoodLevel(); saturation = player.getSaturation();
+            level = player.getLevel(); experience = player.getExp();
+            fireTicks = player.getFireTicks(); freezeTicks = player.getFreezeTicks();
+            fallDistance = player.getFallDistance(); air = player.getRemainingAir();
+            noDamageTicks = player.getNoDamageTicks();
+        }
+
+        private static ItemStack[] copy(ItemStack[] items) {
+            ItemStack[] saved = items.clone();
+            for (int i = 0; i < saved.length; i++) if (saved[i] != null) saved[i] = saved[i].clone();
+            return saved;
+        }
+
+        void restore(Player player, boolean immediate) {
+            player.setGameMode(mode);
+            player.getInventory().setContents(copy(inventory));
+            player.getEnderChest().setContents(copy(enderChest));
+            player.getActivePotionEffects().forEach(effect -> player.removePotionEffect(effect.getType()));
+            for (PotionEffect effect : effects) player.addPotionEffect(effect);
+            player.setHealth(Math.min(health, player.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue()));
+            player.setAbsorptionAmount(absorption);
+            player.setFoodLevel(food); player.setSaturation(saturation);
+            player.setLevel(level); player.setExp(experience);
+            player.setFireTicks(fireTicks); player.setFreezeTicks(freezeTicks);
+            player.setFallDistance(fallDistance); player.setRemainingAir(air);
+            player.setNoDamageTicks(noDamageTicks);
+            if (immediate) player.teleport(origin);
+            else player.teleportAsync(origin);
+        }
+    }
+
     private final Plugin plugin;
     private final Settings settings;
     private final WorldManager worlds;
@@ -59,7 +121,9 @@ public final class UhcGameManager implements Listener {
     private final Set<UUID> alive = new HashSet<>();
     private final Set<UUID> eliminated = new HashSet<>();
     private final Map<UUID, String> names = new HashMap<>();
+    private final Map<UUID, PregamePlayer> pregamePlayers = new HashMap<>();
     private final List<UUID> eliminationOrder = new ArrayList<>();
+    private CompletableFuture<Void> pendingScatter;
     private CombatLoggerManager combat;
     private BorderSchedule border;
     private boolean scatterReady;
@@ -83,6 +147,10 @@ public final class UhcGameManager implements Listener {
     public boolean editable() { return clock.state() == MatchClock.State.IDLE || clock.state() == MatchClock.State.FINISHED; }
     public boolean isAlive(UUID id) { return alive.contains(id); }
     public boolean isEliminated(UUID id) { return eliminated.contains(id); }
+    public boolean shouldSpectate(UUID id) {
+        return eliminated.contains(id) || (state() != MatchClock.State.IDLE
+            && (!alive.contains(id) || combat.hasProxy(id)));
+    }
     public Set<UUID> alive() { return Set.copyOf(alive); }
     public BorderSchedule schedule() { return border == null ? settings.borderSchedule() : border; }
     public int borderPhase() { return borderPhase; }
@@ -97,50 +165,97 @@ public final class UhcGameManager implements Listener {
         List<Player> players = new ArrayList<>(Bukkit.getOnlinePlayers());
         players.removeIf(player -> freeze.isFrozen(player.getUniqueId()) || !player.hasPermission("uhccore.play"));
         if (players.size() < 2) throw new IllegalStateException("At least two eligible players required");
+        if (players.stream().anyMatch(player -> !stats.ready(player.getUniqueId()))) {
+            throw new ProfilesLoadingException();
+        }
         border = settings.borderSchedule();
         World world = worlds.ensureWorld();
         worlds.resetBorder();
         matchId = UUID.randomUUID();
-        alive.clear(); eliminated.clear(); names.clear(); eliminationOrder.clear();
-        for (Player player : players) {
-            alive.add(player.getUniqueId()); names.put(player.getUniqueId(), player.getName());
-            player.getInventory().clear();
-            player.getActivePotionEffects().forEach(effect -> player.removePotionEffect(effect.getType()));
-            player.setGameMode(GameMode.SURVIVAL);
-            player.setHealth(player.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue());
-            player.setFoodLevel(20); player.setSaturation(20); player.setLevel(0); player.setExp(0);
-        }
+        alive.clear(); eliminated.clear(); names.clear(); eliminationOrder.clear(); pregamePlayers.clear();
         scatterReady = false; borderPhase = -1; lastSecond = -1;
         clock.begin(settings.integer("pre-game-seconds"), now());
-        int separation = settings.bool("mecanicas.scatter-seguro") ? settings.integer("mundo.min-distancia-scatter") : 16;
-        scatter.scatter(players, world, settings.integer("mundo.radio"), separation)
-            .whenComplete((ignored, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
-                if (clock.state() != MatchClock.State.PREGAME) return;
-                if (error != null) {
-                    plugin.getLogger().severe("Scatter failed: " + error.getMessage());
-                    clock.reset(); alive.clear(); names.clear();
-                    for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.scatter-failed");
-                    return;
-                }
-                scatterReady = true;
-            }));
-        for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.pregame", "seconds", String.valueOf(settings.integer("pre-game-seconds")));
-        return true;
+        try {
+            for (Player player : players) {
+                alive.add(player.getUniqueId()); names.put(player.getUniqueId(), player.getName());
+                player.closeInventory();
+                pregamePlayers.put(player.getUniqueId(), new PregamePlayer(player));
+                player.getInventory().clear();
+                // The Ender chest is persistent across deaths and matches; leaving it intact
+                // would allow equipment from an earlier UHC to enter a fresh ranked match.
+                player.getEnderChest().clear();
+                player.getActivePotionEffects().forEach(effect -> player.removePotionEffect(effect.getType()));
+                player.setGameMode(GameMode.SURVIVAL);
+                player.setHealth(player.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue());
+                player.setAbsorptionAmount(0);
+                player.setFireTicks(0); player.setFreezeTicks(0); player.setFallDistance(0);
+                player.setNoDamageTicks(0); player.setRemainingAir(player.getMaximumAir());
+                player.setFoodLevel(20); player.setSaturation(20); player.setLevel(0); player.setExp(0);
+            }
+            int separation = settings.bool("mecanicas.scatter-seguro") ? settings.integer("mundo.min-distancia-scatter") : 16;
+            pendingScatter = scatter.scatter(players, world, settings.integer("mundo.radio"), separation);
+            pendingScatter.whenComplete((ignored, error) -> {
+                if (!plugin.isEnabled() || clock.state() != MatchClock.State.PREGAME) return;
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (clock.state() != MatchClock.State.PREGAME) return;
+                    if (error != null) {
+                        plugin.getLogger().severe("Scatter failed: " + error.getMessage());
+                        abortPregame();
+                        for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.scatter-failed");
+                        return;
+                    }
+                    scatterReady = true;
+                });
+            });
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                locales.send(player, "match.pregame", "seconds", String.valueOf(settings.integer("pre-game-seconds")));
+            }
+            return true;
+        } catch (RuntimeException ex) {
+            abortPregame(true);
+            throw ex;
+        }
     }
+
+    private void abortPregame() { abortPregame(false); }
+
+    private void abortPregame(boolean immediate) {
+        if (clock.state() != MatchClock.State.PREGAME) return;
+        clock.reset();
+        if (pendingScatter != null) pendingScatter.cancel(false);
+        pendingScatter = null;
+        for (Map.Entry<UUID, PregamePlayer> entry : pregamePlayers.entrySet()) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player != null && player.isOnline()) entry.getValue().restore(player, immediate);
+        }
+        pregamePlayers.clear();
+        alive.clear(); names.clear(); eliminationOrder.clear();
+        border = null; scatterReady = false; matchId = null;
+    }
+
+    public void close() { abortPregame(true); }
 
     public void reset() {
         if (clock.state() != MatchClock.State.FINISHED) throw new IllegalStateException("Finish the match first");
         clock.reset(); hunter.reset();
-        alive.clear(); eliminated.clear(); names.clear(); eliminationOrder.clear();
+        alive.clear(); names.clear(); eliminationOrder.clear();
+        // Retain eliminated IDs until the next match starts: an offline player
+        // may still have a pre-death inventory saved on disk and must be cleared
+        // if they reconnect between reset and the next scatter.
         border = null; scatterReady = false;
+        stats.discardOffline();
     }
 
     public void tick() {
         if (clock.state() == MatchClock.State.PREGAME && scatterReady && clock.ready(now())) {
             if (alive.size() < 2) {
-                clock.reset(); alive.clear(); names.clear(); return;
+                abortPregame();
+                for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.scatter-failed");
+                return;
             }
             clock.start(now());
+            pendingScatter = null;
+            pregamePlayers.clear();
             startedWall = System.currentTimeMillis();
             stats.participation(Bukkit.getOnlinePlayers().stream()
                 .filter(p -> alive.contains(p.getUniqueId())).map(p -> (Player) p).toList());
@@ -228,6 +343,11 @@ public final class UhcGameManager implements Listener {
         List<ItemStack> loot = new ArrayList<>();
         for (ItemStack item : player.getInventory().getContents()) if (item != null && !item.getType().isAir()) loot.add(item.clone());
         bombs.create(player.getName(), player.getLocation(), skull(player), loot, 0);
+        // Player data is saved on logout. Without clearing it here the same items
+        // survive in the offline inventory AND in the death chest/ground drops.
+        player.getInventory().clear();
+        player.setGameMode(GameMode.SPECTATOR);
+        combat.forget(player.getUniqueId());
         eliminate(player.getUniqueId(), player.getName(), null, Set.of());
     }
 
@@ -266,15 +386,19 @@ public final class UhcGameManager implements Listener {
         Player player = event.getPlayer();
         if (clock.state() == MatchClock.State.PREGAME) {
             alive.remove(player.getUniqueId());
+            PregamePlayer original = pregamePlayers.get(player.getUniqueId());
+            // Keep the snapshot until the match actually starts: a player can
+            // reconnect during scatter and still needs rollback if it fails.
+            if (original != null) original.restore(player, true);
+            if (alive.size() < 2) abortPregame();
         } else forfeit(player);
     }
 
     @EventHandler public void join(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        if ((running() || state() == MatchClock.State.FINISHED)
-            && (!alive.contains(player.getUniqueId()) || combat.hasProxy(player.getUniqueId()))) {
+        if (shouldSpectate(player.getUniqueId())) {
             Bukkit.getScheduler().runTask(plugin, () -> {
-                if (player.isOnline()) {
+                if (player.isOnline() && shouldSpectate(player.getUniqueId())) {
                     player.setGameMode(GameMode.SPECTATOR);
                     if (!alive.contains(player.getUniqueId())) player.getInventory().clear();
                 }

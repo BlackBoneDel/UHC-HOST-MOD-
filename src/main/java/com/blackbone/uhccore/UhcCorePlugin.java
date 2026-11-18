@@ -14,6 +14,7 @@ import com.blackbone.uhccore.hud.UhcHud;
 import com.blackbone.uhccore.i18n.LocaleManager;
 import com.blackbone.uhccore.mechanic.CombatLoggerManager;
 import com.blackbone.uhccore.mechanic.GoldenHeadManager;
+import com.blackbone.uhccore.mechanic.MatchProtection;
 import com.blackbone.uhccore.mechanic.MuteManager;
 import com.blackbone.uhccore.mechanic.RandomKillerManager;
 import com.blackbone.uhccore.mechanic.SpectatorManager;
@@ -83,7 +84,7 @@ public final class UhcCorePlugin extends JavaPlugin implements Listener {
             settings.validate();
             locales = new LocaleManager(this);
             database = new Database(getDataFolder(), getLogger());
-            stats = new StatsManager(database, this);
+            stats = new StatsManager(database, this, locales);
             reports = new ReportManager(database);
             ranks = new RankManager(this, database);
             versions = new ViaVersionBridge(this, settings, locales);
@@ -111,7 +112,7 @@ public final class UhcCorePlugin extends JavaPlugin implements Listener {
                 new TablistPackets(locales, ranks));
 
             for (Listener listener : List.of(this, freeze, mutes, heads, game, combat, spectators,
-                    adminPanel, infoPanel, staffPanel, new MenuProtection())) {
+                    new MatchProtection(game, worlds), adminPanel, infoPanel, staffPanel, new MenuProtection())) {
                 Bukkit.getPluginManager().registerEvents(listener, this);
             }
             new UhcCommand(this).register();
@@ -160,11 +161,13 @@ public final class UhcCorePlugin extends JavaPlugin implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR) public void left(PlayerQuitEvent event) {
         Player player = event.getPlayer();
+        stats.leave(player, game.isAlive(player.getUniqueId()));
         hud.leave(player); ranks.leave(player); locales.leave(player); versions.leave(player);
     }
 
     @Override public void onDisable() {
         Bukkit.getScheduler().cancelTasks(this);
+        if (game != null) game.close();
         if (generation != null) generation.flush();
         if (combat != null) combat.close();
         if (bombs != null) bombs.close();

@@ -20,6 +20,11 @@ class PlayerStatsTest {
         assertEquals(1048, winner.elo());
         assertEquals(1, played.death(984).deaths());
         assertEquals(984, played.death(984).elo());
+        var renamed = winner.renamed("CurrentName");
+        assertEquals("CurrentName", renamed.name());
+        assertEquals(1048, renamed.elo());
+        assertEquals(1, renamed.kills());
+        assertEquals("Player", winner.name());
     }
 
     @Test void invalidDataRejected() {

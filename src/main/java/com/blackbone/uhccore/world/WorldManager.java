@@ -16,7 +16,7 @@ public final class WorldManager {
     public World ensureWorld() {
         if (world != null) return world;
         String name = settings.string("mundo.nombre");
-        if (name.isBlank() || name.contains("/") || name.contains("\\") || name.equals("..")) {
+        if (name.isBlank() || name.contains("/") || name.contains("\\") || name.equals("..") || name.equals(".")) {
             throw new IllegalArgumentException("Unsafe UHC world name");
         }
         world = Bukkit.getWorld(name);
@@ -26,7 +26,12 @@ public final class WorldManager {
             world = creator.createWorld();
         }
         if (world == null) throw new IllegalStateException("Paper could not create UHC world");
+        // A full hunger bar must never heal a UHC participant. Enforce the rule even
+        // when the world already existed before this plugin was installed.
+        world.setGameRule(GameRules.NATURAL_HEALTH_REGENERATION, false);
+        world.setGameRule(GameRules.PVP, true);
         world.setGameRule(GameRules.IMMEDIATE_RESPAWN, true);
+        world.setGameRule(GameRules.KEEP_INVENTORY, false);
         return world;
     }
 
