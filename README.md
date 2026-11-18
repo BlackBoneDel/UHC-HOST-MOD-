@@ -73,6 +73,7 @@ En mecánicas, las fases de borde usan botones ± radio, Shift ± inicio, medio 
 │   ├── Adventure-NBT-LICENSE.txt
 │   ├── FastBoard-LICENSE.txt
 │   ├── HikariCP-LICENSE.txt
+│   ├── Kyori-Examination-LICENSE.txt
 │   ├── Kyori-Option-LICENSE.txt
 │   ├── mysql-connector-j-LICENSE.txt
 │   ├── PacketEvents-LICENSE.txt

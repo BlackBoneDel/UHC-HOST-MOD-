@@ -12,11 +12,15 @@ in META-INF/licenses/ inside the released JAR.
   https://github.com/retrooper/packetevents (licenses/PacketEvents-LICENSE.txt)
 * Kyori Adventure NBT 4.26.1 — KyoriPowered contributors — MIT License.
   PacketEvents requires net.kyori.adventure.nbt at runtime; Paper provides
-  Adventure's text API but not NBT. The NBT classes remain unrelocated in this
-  plugin classloader, while Paper's Adventure text API retains its shared
-  class identity. (licenses/Adventure-NBT-LICENSE.txt)
+  Adventure's text API but not NBT to plugins. The NBT classes are relocated to
+  com.blackbone.uhccore.libs.adventure.nbt, while Paper's Adventure text API
+  retains its shared class identity. (licenses/Adventure-NBT-LICENSE.txt)
+* Kyori Examination 1.3.0 — KyoriPowered contributors — MIT License.
+  Required by Adventure NBT; net.kyori.examination is relocated to
+  com.blackbone.uhccore.libs.adventure.examination.
+  (licenses/Kyori-Examination-LICENSE.txt)
 * Kyori Option — KyoriPowered contributors — MIT License.
-  net.kyori.option classes used by PacketEvents are also retained.
+  PacketEvents includes a relocated copy of net.kyori.option.
   (licenses/Kyori-Option-LICENSE.txt)
 * FastBoard 2.2.2 — MrMicky — MIT License.
   fr.mrmicky.fastboard -> com.blackbone.uhccore.libs.fastboard.
@@ -41,6 +45,6 @@ in META-INF/licenses/ inside the released JAR.
   (licenses/mysql-connector-j-LICENSE.txt)
 
 Paper API, ViaVersion API, and Adventure text API are compile-only and NOT
-shaded into UhcCore. The Adventure NBT/Option exceptions above are required
-by PacketEvents. Other transitive classes remain subject to the license
-notices distributed with their respective dependency JARs.
+shaded into UhcCore. The Adventure NBT/Examination and Option exceptions
+above are required by PacketEvents. Other transitive classes remain subject
+to the license notices distributed with their respective dependency JARs.

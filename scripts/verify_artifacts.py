@@ -52,10 +52,13 @@ def main(path: Path) -> None:
         names = set(jar.namelist())
         for item in ("paper-plugin.yml", "com/blackbone/uhccore/UhcCorePlugin.class",
                      "com/blackbone/uhccore/libs/sqlite/SQLiteDriver.class",
-                     "org/sqlite/JDBC.class", "net/kyori/adventure/nbt/BinaryTag.class",
+                     "org/sqlite/JDBC.class",
+                     "com/blackbone/uhccore/libs/adventure/nbt/BinaryTag.class",
+                     "com/blackbone/uhccore/libs/adventure/examination/Examinable.class",
                      "META-INF/LICENSE", "META-INF/NOTICE",
                      "META-INF/licenses/sqlite-jdbc-LICENSE.txt",
                      "META-INF/licenses/Adventure-NBT-LICENSE.txt",
+                     "META-INF/licenses/Kyori-Examination-LICENSE.txt",
                      "packs/uhccore-pack.zip", "packs/uhccore-legacy-pack.zip"):
             require(item in names, f"missing bundled resource: {item}")
         metadata = jar.read("paper-plugin.yml").decode("utf-8")
@@ -69,7 +72,7 @@ def main(path: Path) -> None:
                     f"missing shaded dependency: {package}")
         for package in ("com/github/retrooper/packetevents/", "io/github/retrooper/packetevents/",
                         "fr/mrmicky/fastboard/", "com/zaxxer/hikari/", "com/mysql/cj/",
-                        "org/bukkit/"):
+                        "net/kyori/adventure/nbt/", "net/kyori/examination/", "org/bukkit/"):
             require(not any(name.startswith(package) and name.endswith(".class") for name in names),
                     f"dependency not relocated or bundled server API: {package}")
         require(any(name.startswith("org/sqlite/native/") and name.endswith((".so", ".dll", ".dylib"))

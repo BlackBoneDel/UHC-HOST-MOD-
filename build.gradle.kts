@@ -88,12 +88,14 @@ tasks.named<ShadowJar>("shadowJar") {
     // its JNI implementation would break SQLite on every OS; a namespaced driver adapter
     // below is isolated by Paper's plugin classloader while the JNI payload stays intact.
     relocate("com.mysql.cj", "com.blackbone.uhccore.libs.mysql")
-    // Paper provides Adventure's text API, but NOT adventure-nbt. PacketEvents
-    // needs BinaryTag while loading its registries in onLoad. Retain NBT and
-    // Kyori's option utility from the dependency, not duplicate text Components.
+    // Paper provides Adventure text, but not NBT or Kyori Examination to the
+    // plugin classloader. PacketEvents bundles both; isolate them together so
+    // neither their Examinable interface nor BinaryTag can clash with plugins.
+    relocate("net.kyori.adventure.nbt", "com.blackbone.uhccore.libs.adventure.nbt")
+    relocate("net.kyori.examination", "com.blackbone.uhccore.libs.adventure.examination")
     exclude { entry -> entry.path.startsWith("net/kyori/")
         && !entry.path.startsWith("net/kyori/adventure/nbt/")
-        && !entry.path.startsWith("net/kyori/option/") }
+        && !entry.path.startsWith("net/kyori/examination/") }
     exclude("io/netty/**", "org/bukkit/**", "io/papermc/**", "org/slf4j/**")
 }
 
