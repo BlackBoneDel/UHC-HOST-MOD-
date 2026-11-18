@@ -94,9 +94,8 @@ public final class UhcGameManager implements Listener {
 
     public boolean begin() {
         if (clock.state() != MatchClock.State.IDLE) return false;
-        List<Player> players = Bukkit.getOnlinePlayers().stream()
-            .filter(player -> !freeze.isFrozen(player.getUniqueId()) && player.hasPermission("uhccore.play"))
-            .toList();
+        List<Player> players = new ArrayList<>(Bukkit.getOnlinePlayers());
+        players.removeIf(player -> freeze.isFrozen(player.getUniqueId()) || !player.hasPermission("uhccore.play"));
         if (players.size() < 2) throw new IllegalStateException("At least two eligible players required");
         border = settings.borderSchedule();
         World world = worlds.ensureWorld();
@@ -143,7 +142,8 @@ public final class UhcGameManager implements Listener {
             }
             clock.start(now());
             startedWall = System.currentTimeMillis();
-            stats.participation(Bukkit.getOnlinePlayers().stream().filter(p -> alive.contains(p.getUniqueId())).toList());
+            stats.participation(Bukkit.getOnlinePlayers().stream()
+                .filter(p -> alive.contains(p.getUniqueId())).map(p -> (Player) p).toList());
             discord.announce("UHC started: " + alive.size() + " players. World: " + worlds.ensureWorld().getName());
             for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.started", "count", String.valueOf(alive.size()));
         }
@@ -157,7 +157,7 @@ public final class UhcGameManager implements Listener {
             borderPhase = i;
             World world = worlds.ensureWorld();
             if (world.getWorldBorder().getSize() / 2.0 > phase.targetRadius()) {
-                world.getWorldBorder().setSize(phase.targetRadius() * 2.0, phase.durationSeconds());
+                world.getWorldBorder().changeSize(phase.targetRadius() * 2.0, phase.durationSeconds() * 20L);
                 for (Player player : Bukkit.getOnlinePlayers()) locales.send(player, "match.border-phase",
                     "radius", String.valueOf(phase.targetRadius()), "seconds", String.valueOf(phase.durationSeconds()));
             }
@@ -169,7 +169,7 @@ public final class UhcGameManager implements Listener {
         if (!running() || radius < 5 || seconds < 1 || radius >= worlds.ensureWorld().getWorldBorder().getSize() / 2) {
             throw new IllegalArgumentException("Border must shrink during a running match");
         }
-        worlds.ensureWorld().getWorldBorder().setSize(radius * 2.0, seconds);
+        worlds.ensureWorld().getWorldBorder().changeSize(radius * 2.0, seconds * 20L);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
