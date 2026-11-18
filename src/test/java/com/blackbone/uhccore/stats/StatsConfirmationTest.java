@@ -62,6 +62,14 @@ class StatsConfirmationTest {
         assertEquals(1032, stats.get(player.getUniqueId(), player.getName()).elo());
     }
 
+    @Test void rejectedLanguageWriteReturnsAnExceptionalFuture() {
+        var player = server.addPlayer("Translator");
+        var stats = new StatsManager(database, MockBukkit.createMockPlugin(),
+            new LocaleManager(Path.of("src/main/resources/lang").toFile()));
+        database.close();
+        assertThrows(CompletionException.class, () -> stats.language(player, "en").join());
+    }
+
     @Test void rejectedDatabaseQueuePropagatesFailureWithoutPublishingAPhantomWin() {
         var player = server.addPlayer("Carol");
         var stats = new StatsManager(database, MockBukkit.createMockPlugin(),

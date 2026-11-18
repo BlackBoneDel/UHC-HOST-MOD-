@@ -95,8 +95,18 @@ public final class UhcCommand implements BasicCommand {
         if (!plugin.stats().ready(player.getUniqueId())) {
             plugin.locales().send(sender, "match.profiles-loading"); return;
         }
-        plugin.locales().select(player, args[1]);
-        notifyWhenDone(player, plugin.stats().language(player, args[1]), "command.lang-set");
+        String requested = args[1];
+        plugin.stats().language(player, requested).whenComplete((ignored, error) -> {
+            if (!plugin.isEnabled()) return;
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (!player.isOnline()) return;
+                if (error != null) plugin.locales().send(player, "command.persistence-error");
+                else {
+                    plugin.locales().select(player, requested);
+                    plugin.locales().send(player, "command.lang-set");
+                }
+            });
+        });
     }
 
     private void freeze(CommandSender sender, String[] args, boolean apply) {

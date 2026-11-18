@@ -33,7 +33,6 @@ public final class StatsManager {
     private final Map<UUID, PlayerStats> committed = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> pending = new ConcurrentHashMap<>();
     private final Set<UUID> failed = ConcurrentHashMap.newKeySet();
-    private final Set<UUID> languageUnconfirmed = ConcurrentHashMap.newKeySet();
     private final Set<UUID> ready = ConcurrentHashMap.newKeySet();
     private final Function<List<PlayerStats>, CompletableFuture<Void>> writer;
 
@@ -56,7 +55,6 @@ public final class StatsManager {
     public boolean confirmed(UUID uuid) {
         return committed.containsKey(uuid) && !pending.containsKey(uuid) && !failed.contains(uuid);
     }
-    public boolean languageConfirmed(UUID uuid) { return !languageUnconfirmed.contains(uuid); }
 
     public void leave(Player player, boolean retainForProxy) {
         UUID uuid = player.getUniqueId();
@@ -166,7 +164,6 @@ public final class StatsManager {
     public CompletableFuture<Void> language(Player player, String language) {
         UUID id = player.getUniqueId();
         String name = player.getName();
-        languageUnconfirmed.add(id);
         return database.<Void>async(connection -> {
             ensure(connection, id, name);
             try (PreparedStatement statement = connection.prepareStatement("UPDATE players SET lang=? WHERE uuid=?")) {
@@ -178,7 +175,6 @@ public final class StatsManager {
         }).whenComplete((ignored, error) -> {
             if (error != null) plugin.getLogger().log(Level.SEVERE,
                 "Language write not confirmed for player " + id + " (" + language + ")", error);
-            else languageUnconfirmed.remove(id);
         });
     }
 
