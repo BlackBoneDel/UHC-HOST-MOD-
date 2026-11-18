@@ -36,6 +36,11 @@ jobs:
         run: |
           set -o pipefail
           python3 scripts/verify_artifacts.py build/libs/uhccore-1.0.0.jar 2>&1 | tee -a build-result.log
+      - name: Boot and smoke-test official Paper 26.3
+        timeout-minutes: 8
+        run: |
+          set -o pipefail
+          python3 scripts/smoke_paper.py build/libs/uhccore-1.0.0.jar 2>&1 | tee -a build-result.log
       - uses: actions/upload-artifact@v7
         if: success()
         with:

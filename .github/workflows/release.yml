@@ -26,6 +26,9 @@ jobs:
         run: |
           ./gradlew --no-daemon test pitest shadowJar
           python3 scripts/verify_artifacts.py "build/libs/uhccore-${UHC_VERSION}.jar"
+      - name: Smoke-test release on official Paper 26.3
+        timeout-minutes: 8
+        run: python3 scripts/smoke_paper.py "build/libs/uhccore-${UHC_VERSION}.jar"
       - name: Changelog from Conventional Commits
         shell: bash
         run: |
