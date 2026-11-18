@@ -232,6 +232,7 @@ public final class UhcGameManager implements Listener {
             if (player != null && player.isOnline()) entry.getValue().restore(player, immediate);
         }
         pregamePlayers.clear();
+        if (spectators != null) spectators.restoreLateJoiners();
         alive.clear(); names.clear(); eliminationOrder.clear();
         border = null; scatterReady = false; matchId = null;
     }
@@ -376,6 +377,7 @@ public final class UhcGameManager implements Listener {
         UUID winner = alive.stream().findFirst().orElse(null);
         if (winner != null && combat.hasProxy(winner)) return;
         clock.finish();
+        if (spectators != null) spectators.restoreLateJoiners();
         if (winner != null) stats.victory(winner, name(winner));
         List<UUID> ranking = new ArrayList<>(alive);
         for (int i = eliminationOrder.size() - 1; i >= 0; i--) ranking.add(eliminationOrder.get(i));
@@ -414,11 +416,12 @@ public final class UhcGameManager implements Listener {
 
     @EventHandler public void join(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        if (shouldSpectate(player.getUniqueId())) {
+        // SpectatorManager owns late-join inventory backup BEFORE equip/clear.
+        // Only a still-living combat-logger with a proxy is handled here.
+        if (alive.contains(player.getUniqueId()) && combat.hasProxy(player.getUniqueId())) {
             Bukkit.getScheduler().runTask(plugin, () -> {
-                if (player.isOnline() && shouldSpectate(player.getUniqueId())) {
+                if (player.isOnline() && combat.hasProxy(player.getUniqueId())) {
                     player.setGameMode(GameMode.SPECTATOR);
-                    if (!alive.contains(player.getUniqueId())) player.getInventory().clear();
                 }
             });
         }

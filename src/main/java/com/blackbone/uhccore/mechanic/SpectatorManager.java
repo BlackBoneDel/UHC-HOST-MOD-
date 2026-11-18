@@ -5,10 +5,23 @@ import com.blackbone.uhccore.game.UhcGameManager;
 import com.blackbone.uhccore.i18n.LocaleManager;
 import com.destroystokyo.paper.event.player.PlayerPostRespawnEvent;
 import io.papermc.paper.event.player.AsyncChatEvent;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.UUID;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
+import java.util.logging.Level;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
@@ -37,10 +50,16 @@ import org.bukkit.plugin.Plugin;
 /** Immediate respawn, spectator camera compass, and an isolated Adventure chat channel. */
 public final class SpectatorManager implements Listener {
     private static final int PAGE_SIZE = 45;
+    private static final int BACKUP_FORMAT = 1;
+    private static final int MAX_BACKUP_BYTES = 8 * 1024 * 1024;
+    private record LateJoinBackup(GameMode mode, ItemStack[] inventory, ItemStack[] armor,
+                                  ItemStack[] offhand, ItemStack[] enderChest) { }
     private final Plugin plugin;
     private final UhcGameManager game;
     private final LocaleManager locales;
     private final NamespacedKey compassKey;
+    private final Path backupFolder;
+    private final Consumer<Player> savePlayerData;
     private final Set<UUID> spectatorIds = ConcurrentHashMap.newKeySet();
 
     private static final class Holder implements UhcMenu {
@@ -52,8 +71,16 @@ public final class SpectatorManager implements Listener {
     }
 
     public SpectatorManager(Plugin plugin, UhcGameManager game, LocaleManager locales) {
+        this(plugin, game, locales, Player::saveData);
+    }
+
+    // MockBukkit cannot implement Player.saveData(); tests inject only that last acknowledgement.
+    SpectatorManager(Plugin plugin, UhcGameManager game, LocaleManager locales,
+                     Consumer<Player> savePlayerData) {
         this.plugin = plugin; this.game = game; this.locales = locales;
+        this.savePlayerData = java.util.Objects.requireNonNull(savePlayerData);
         compassKey = new NamespacedKey(plugin, "spectator_compass");
+        backupFolder = plugin.getDataFolder().toPath().resolve("late-join-inventories");
     }
 
     @EventHandler public void respawnLocation(PlayerRespawnEvent event) {
@@ -70,14 +97,136 @@ public final class SpectatorManager implements Listener {
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
         if (player.getGameMode() == GameMode.SPECTATOR) spectatorIds.add(id);
+        if (!matchActive() && Files.exists(backupFile(id))) {
+            restoreIfStored(player); // failure kicks; never follow it by clearing the inventory
+            return;
+        }
         if (!spectatorOnJoin(id)) return;
+        if (!game.isEliminated(id) && !game.isAlive(id)) {
+            try {
+                // Save BEFORE equip, in the same join tick: a one-tick gap could
+                // let a late joiner move or drop the original items after backup.
+                saveLateJoinBackup(player);
+                equip(player);
+            } catch (IOException | RuntimeException error) {
+                plugin.getLogger().log(Level.SEVERE, "Late-join inventory backup/equip failed for " + id, error);
+                player.kick(locales.text(player, "command.persistence-error"));
+            }
+            return;
+        }
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (player.isOnline() && spectatorOnJoin(id)) equip(player);
         });
     }
 
+    private boolean matchActive() {
+        return game.state() == MatchClock.State.PREGAME || game.state() == MatchClock.State.RUNNING;
+    }
+
     private boolean spectatorOnJoin(UUID id) {
-        return game.isEliminated(id) || (game.state() != MatchClock.State.IDLE && !game.isAlive(id));
+        return game.isEliminated(id) || (matchActive() && !game.isAlive(id));
+    }
+
+    private Path backupFile(UUID id) { return backupFolder.resolve(id + ".dat"); }
+
+    private void saveLateJoinBackup(Player player) throws IOException {
+        Path file = backupFile(player.getUniqueId());
+        if (Files.exists(file)) {
+            readBackup(file, player.getUniqueId()); // never replace the original with a spectator compass
+            return;
+        }
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (DataOutputStream output = new DataOutputStream(bytes)) {
+            output.writeInt(BACKUP_FORMAT);
+            output.writeUTF(player.getUniqueId().toString());
+            output.writeUTF(player.getGameMode().name());
+            writeItems(output, player.getInventory().getContents());
+            writeItems(output, player.getInventory().getArmorContents());
+            writeItems(output, new ItemStack[] { player.getInventory().getItemInOffHand() });
+            writeItems(output, player.getEnderChest().getContents());
+        }
+        if (bytes.size() > MAX_BACKUP_BYTES) throw new IOException("Late-join inventory exceeds backup size limit");
+        Files.createDirectories(backupFolder);
+        Path temporary = Files.createTempFile(backupFolder, player.getUniqueId().toString(), ".tmp");
+        try {
+            Files.write(temporary, bytes.toByteArray());
+            try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
+                channel.force(true);
+            }
+            try {
+                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, file);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static void writeItems(DataOutputStream output, ItemStack[] items) throws IOException {
+        byte[] bytes = ItemStack.serializeItemsAsBytes(items);
+        if (bytes.length > MAX_BACKUP_BYTES) throw new IOException("Item data exceeds backup size limit");
+        output.writeInt(bytes.length);
+        output.write(bytes);
+    }
+
+    private static ItemStack[] readItems(DataInputStream input) throws IOException {
+        int length = input.readInt();
+        if (length < 1 || length > MAX_BACKUP_BYTES) throw new IOException("Invalid saved inventory length");
+        byte[] bytes = new byte[length];
+        input.readFully(bytes);
+        try {
+            return ItemStack.deserializeItemsFromBytes(bytes);
+        } catch (RuntimeException error) {
+            throw new IOException("Invalid saved inventory items", error);
+        }
+    }
+
+    private LateJoinBackup readBackup(Path file, UUID id) throws IOException {
+        if (Files.size(file) > MAX_BACKUP_BYTES) throw new IOException("Oversized late-join inventory backup");
+        try (DataInputStream input = new DataInputStream(new ByteArrayInputStream(Files.readAllBytes(file)))) {
+            if (input.readInt() != BACKUP_FORMAT || !input.readUTF().equals(id.toString())) {
+                throw new IOException("Late-join inventory version or UUID mismatch");
+            }
+            GameMode mode;
+            try { mode = GameMode.valueOf(input.readUTF()); }
+            catch (IllegalArgumentException error) { throw new IOException("Invalid saved game mode", error); }
+            LateJoinBackup saved = new LateJoinBackup(mode, readItems(input), readItems(input),
+                readItems(input), readItems(input));
+            if (saved.offhand().length != 1 || input.available() != 0) {
+                throw new IOException("Malformed late-join inventory backup");
+            }
+            return saved;
+        }
+    }
+
+    private boolean restoreIfStored(Player player) {
+        Path file = backupFile(player.getUniqueId());
+        if (!Files.exists(file)) return false;
+        try {
+            LateJoinBackup saved = readBackup(file, player.getUniqueId());
+            player.closeInventory();
+            player.getInventory().setContents(saved.inventory());
+            player.getInventory().setArmorContents(saved.armor());
+            player.getInventory().setItemInOffHand(saved.offhand()[0]);
+            player.getEnderChest().setContents(saved.enderChest());
+            player.setGameMode(saved.mode());
+            // Commit playerdata before deleting the only independent copy of these items.
+            savePlayerData.accept(player);
+            Files.delete(file);
+            if (saved.mode() != GameMode.SPECTATOR) spectatorIds.remove(player.getUniqueId());
+            return true;
+        } catch (IOException | RuntimeException error) {
+            plugin.getLogger().log(Level.SEVERE,
+                "Late-join inventory restoration NOT CONFIRMED for " + player.getUniqueId(), error);
+            player.kick(locales.text(player, "command.persistence-error"));
+            return false;
+        }
+    }
+
+    /** End of match or aborted countdown: online late joiners get their original items back. */
+    public void restoreLateJoiners() {
+        for (Player player : Bukkit.getOnlinePlayers()) restoreIfStored(player);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -96,6 +245,7 @@ public final class SpectatorManager implements Listener {
 
     public void equip(Player player) {
         player.setGameMode(GameMode.SPECTATOR);
+        spectatorIds.add(player.getUniqueId());
         player.getInventory().clear();
         ItemStack compass = new ItemStack(Material.COMPASS);
         ItemMeta meta = compass.getItemMeta();
