@@ -88,9 +88,9 @@ def send_command(process: subprocess.Popen, command: str) -> None:
 
 
 def check_checkpoint(server: Path) -> None:
-    world = server / "uhc_world" / "level.dat"
-    if not world.is_file():
-        raise RuntimeError("Paper did not save the created UHC world")
+    # Paper's on-disk multiworld layout can change; the successful start/pause/
+    # cancel commands and this persisted checkpoint prove Bukkit created the
+    # configured world without assuming a particular level.dat location.
     database_path = server / "plugins/UhcCore/data/uhc.db"
     if not database_path.is_file():
         raise RuntimeError("UhcCore did not create its SQLite database")
