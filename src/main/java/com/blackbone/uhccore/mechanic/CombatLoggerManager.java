@@ -229,6 +229,13 @@ public final class CombatLoggerManager implements Listener {
         }));
     }
 
+    /** A tag from the previous match must never spawn a proxy in the next one. */
+    public void clearRound() {
+        if (!proxies.isEmpty()) throw new IllegalStateException("Cannot reset with live combat proxies");
+        tags.clear();
+        damageLedger.clear();
+    }
+
     public void close() {
         for (Proxy proxy : proxies.values()) {
             if (proxy.entity.isValid()) proxy.entity.remove();

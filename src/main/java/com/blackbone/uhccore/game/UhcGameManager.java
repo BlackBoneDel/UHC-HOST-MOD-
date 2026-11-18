@@ -240,6 +240,7 @@ public final class UhcGameManager implements Listener {
 
     public void reset() {
         if (clock.state() != MatchClock.State.FINISHED) throw new IllegalStateException("Finish the match first");
+        combat.clearRound();
         clock.reset(); hunter.reset();
         alive.clear(); names.clear(); eliminationOrder.clear();
         // Retain eliminated IDs until the next match starts: an offline player
