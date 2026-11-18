@@ -34,16 +34,18 @@ import org.bukkit.event.player.PlayerPickupArrowEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
+import org.bukkit.plugin.Plugin;
 
 /** Memory-only administrative freeze. Rotation and private messages to staff remain possible. */
 public final class UhcFreezeManager implements Listener {
     public record Frozen(String name, UUID staff, Instant since) { }
     private final Map<UUID, Frozen> frozen = new ConcurrentHashMap<>();
+    private final Plugin plugin;
     private final LocaleManager locales;
     private final UhcPermissible permissions;
 
-    public UhcFreezeManager(LocaleManager locales, UhcPermissible permissions) {
-        this.locales = locales; this.permissions = permissions;
+    public UhcFreezeManager(Plugin plugin, LocaleManager locales, UhcPermissible permissions) {
+        this.plugin = plugin; this.locales = locales; this.permissions = permissions;
     }
 
     public boolean freeze(Player player, Player staff) {
@@ -107,9 +109,23 @@ public final class UhcFreezeManager implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void chat(AsyncChatEvent event) {
         if (!isFrozen(event.getPlayer().getUniqueId())) return;
-        var previous = event.renderer();
-        event.renderer((source, display, message, viewer) -> Component.text("[Frozen] ", TextColor.fromHexString("#57D9E8"))
-            .append(previous.render(source, display, message, viewer)));
+        // A frozen participant must not relay tactics to the public/spectator
+        // channel. AsyncChatEvent may run off-thread: resolve staff permissions
+        // and deliver the private moderation channel back on the server thread.
+        event.setCancelled(true);
+        Player sender = event.getPlayer();
+        Component message = event.message();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Component rendered = Component.text("[Frozen] ", TextColor.fromHexString("#57D9E8"))
+                .append(Component.text(sender.getName() + ": ")).append(message);
+            boolean echoed = false;
+            for (Player staff : Bukkit.getOnlinePlayers()) {
+                if (!permissions.hasPermission(staff, "uhccore.staff.notify")) continue;
+                staff.sendMessage(rendered);
+                if (staff.getUniqueId().equals(sender.getUniqueId())) echoed = true;
+            }
+            if (!echoed && sender.isOnline()) sender.sendMessage(rendered);
+        });
     }
 
     @EventHandler public void quit(PlayerQuitEvent event) {

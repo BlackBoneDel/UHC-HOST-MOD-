@@ -3,7 +3,12 @@ package com.blackbone.uhccore.mechanic;
 import static org.junit.jupiter.api.Assertions.*;
 import com.blackbone.uhccore.i18n.LocaleManager;
 import com.destroystokyo.paper.event.player.PlayerJumpEvent;
+import io.papermc.paper.event.player.AsyncChatEvent;
 import java.io.File;
+import java.util.HashSet;
+import net.kyori.adventure.audience.Audience;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Location;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
@@ -24,7 +29,8 @@ class UhcFreezeManagerTest {
         server = MockBukkit.mock();
         staff = server.addPlayer("Moderator");
         victim = server.addPlayer("FrozenPlayer");
-        freeze = new UhcFreezeManager(new LocaleManager(new File("src/main/resources/lang")),
+        freeze = new UhcFreezeManager(MockBukkit.createMockPlugin(),
+            new LocaleManager(new File("src/main/resources/lang")),
             (player, node) -> player.getUniqueId().equals(staff.getUniqueId()));
     }
 
@@ -49,6 +55,25 @@ class UhcFreezeManagerTest {
         var walking = new PlayerMoveEvent(victim, start, start.clone().add(1, 0, 0));
         freeze.move(walking);
         assertFalse(walking.isCancelled());
+    }
+
+    @Test void frozenChatIsPrivateToStaffAndEchoedToItsSender() {
+        PlayerMock publicPlayer = server.addPlayer("PublicPlayer");
+        freeze.freeze(victim, staff);
+        Component text = Component.text("please help");
+        var event = new AsyncChatEvent(true, victim, new HashSet<Audience>(),
+            (source, display, message, viewer) -> message, text, text, null);
+
+        freeze.chat(event);
+        assertTrue(event.isCancelled());
+        server.getScheduler().performOneTick();
+
+        Component received = staff.nextComponentMessage();
+        assertNotNull(received);
+        assertEquals("[Frozen] FrozenPlayer: please help",
+            PlainTextComponentSerializer.plainText().serialize(received));
+        assertEquals(received, victim.nextComponentMessage());
+        assertNull(publicPlayer.nextComponentMessage());
     }
 
     @Test void onlyMessagesToOnlineStaffRemainAvailable() {

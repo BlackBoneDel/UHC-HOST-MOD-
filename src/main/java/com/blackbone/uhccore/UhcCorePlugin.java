@@ -90,7 +90,7 @@ public final class UhcCorePlugin extends JavaPlugin implements Listener {
             versions = new ViaVersionBridge(this, settings, locales);
             worlds = new WorldManager(settings);
             generation = new PregenerationManager(this, database, worlds);
-            freeze = new UhcFreezeManager(locales, ranks);
+            freeze = new UhcFreezeManager(this, locales, ranks);
             mutes = new MuteManager(this, locales);
             heads = new GoldenHeadManager(this, settings, locales, freeze);
             bombs = new TimeBombManager(settings, locales);
