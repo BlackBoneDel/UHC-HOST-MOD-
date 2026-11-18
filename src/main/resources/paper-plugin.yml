@@ -12,6 +12,10 @@ dependencies:
       load: BEFORE
       required: false
       join-classpath: true
+    ViaBackwards:
+      load: BEFORE
+      required: false
+      join-classpath: false
     LuckPerms:
       load: BEFORE
       required: false
