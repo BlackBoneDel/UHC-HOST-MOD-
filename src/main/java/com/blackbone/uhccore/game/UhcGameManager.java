@@ -6,6 +6,7 @@ import com.blackbone.uhccore.domain.BorderPhase;
 import com.blackbone.uhccore.domain.BorderSchedule;
 import com.blackbone.uhccore.domain.MatchClock;
 import com.blackbone.uhccore.i18n.LocaleManager;
+import com.blackbone.uhccore.mechanic.SpectatorManager;
 import com.blackbone.uhccore.mechanic.CombatLoggerManager;
 import com.blackbone.uhccore.mechanic.GoldenHeadManager;
 import com.blackbone.uhccore.mechanic.RandomKillerManager;
@@ -125,6 +126,7 @@ public final class UhcGameManager implements Listener {
     private final List<UUID> eliminationOrder = new ArrayList<>();
     private CompletableFuture<Void> pendingScatter;
     private CombatLoggerManager combat;
+    private SpectatorManager spectators;
     private BorderSchedule border;
     private boolean scatterReady;
     private int borderPhase = -1;
@@ -142,6 +144,7 @@ public final class UhcGameManager implements Listener {
     }
 
     public void setCombat(CombatLoggerManager combat) { this.combat = combat; }
+    public void setSpectators(SpectatorManager spectators) { this.spectators = java.util.Objects.requireNonNull(spectators); }
     public MatchClock.State state() { return clock.state(); }
     public boolean running() { return clock.state() == MatchClock.State.RUNNING; }
     public boolean editable() { return clock.state() == MatchClock.State.IDLE || clock.state() == MatchClock.State.FINISHED; }
@@ -301,6 +304,7 @@ public final class UhcGameManager implements Listener {
         if (killer != null && !alive.contains(killer)) killer = null;
         List<ItemStack> loot = event.getDrops().stream().map(ItemStack::clone).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         event.getDrops().clear();
+        victim.getEnderChest().clear();
         if (settings.bool("mecanicas.golden-heads")
             && ThreadLocalRandom.current().nextDouble() < settings.decimal("mecanicas.golden-heads-probabilidad")) {
             loot.add(heads.create(victim));
@@ -324,6 +328,18 @@ public final class UhcGameManager implements Listener {
                            ItemStack head, UUID killer, Set<UUID> assists) {
         if (!running() || !alive.contains(id)) return;
         bombs.create(name, location, head, loot, 0);
+        // Reconnect can race the proxy's death: a spectator may still have the
+        // original inventory loaded from playerdata. Never leave two copies of
+        // the loot (online player and the death drops) on that path.
+        Player connected = Bukkit.getPlayer(id);
+        if (connected != null && connected.isOnline()) {
+            if (spectators != null) spectators.retireConnectedParticipant(connected);
+            else {
+                connected.getEnderChest().clear();
+                connected.getInventory().clear();
+                connected.setGameMode(GameMode.SPECTATOR);
+            }
+        }
         eliminate(id, name, killer != null && alive.contains(killer) ? killer : null, assists);
     }
 
@@ -346,6 +362,7 @@ public final class UhcGameManager implements Listener {
         // Player data is saved on logout. Without clearing it here the same items
         // survive in the offline inventory AND in the death chest/ground drops.
         player.getInventory().clear();
+        player.getEnderChest().clear();
         player.setGameMode(GameMode.SPECTATOR);
         combat.forget(player.getUniqueId());
         eliminate(player.getUniqueId(), player.getName(), null, Set.of());

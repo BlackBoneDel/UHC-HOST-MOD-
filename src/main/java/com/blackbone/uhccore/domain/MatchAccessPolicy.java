@@ -15,6 +15,11 @@ public final class MatchAccessPolicy {
         return participant ? state == MatchClock.State.RUNNING && inArena : !inArena;
     }
 
+    /** A reconnecting combat-logger still has a live proxy: the real player may not act. */
+    public static boolean canAct(MatchClock.State state, boolean participant, boolean inArena, boolean proxyActive) {
+        return !proxyActive && canAct(state, participant, inArena);
+    }
+
     public static boolean mayTeleport(MatchClock.State state, boolean participant, boolean destinationInArena) {
         return !active(state) || !participant || destinationInArena;
     }

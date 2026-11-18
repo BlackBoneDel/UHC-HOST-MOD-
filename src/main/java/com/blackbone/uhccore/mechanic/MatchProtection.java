@@ -20,10 +20,12 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
@@ -40,9 +42,14 @@ public final class MatchProtection implements Listener {
         this.worlds = worlds;
     }
 
+    private boolean proxyOwner(UUID id) {
+        return game.isAlive(id) && game.shouldSpectate(id);
+    }
+
     private boolean canAct(Player player) {
-        return MatchAccessPolicy.canAct(game.state(), game.isAlive(player.getUniqueId()),
-            player.getWorld() == worlds.world());
+        UUID id = player.getUniqueId();
+        return MatchAccessPolicy.canAct(game.state(), game.isAlive(id),
+            player.getWorld() == worlds.world(), proxyOwner(id));
     }
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
@@ -71,12 +78,22 @@ public final class MatchProtection implements Listener {
     }
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void consume(PlayerItemConsumeEvent event) {
+        if (!canAct(event.getPlayer())) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void launch(ProjectileLaunchEvent event) {
+        if (event.getEntity().getShooter() instanceof Player player && !canAct(player)) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void interact(PlayerInteractEvent event) {
         // Spectator mode cannot modify blocks, but its custom compass must still
         // receive the interaction so its read-only target menu can open.
-        if (event.getPlayer().getGameMode() != GameMode.SPECTATOR && !canAct(event.getPlayer())) {
-            event.setCancelled(true);
-        }
+        Player player = event.getPlayer();
+        if ((player.getGameMode() != GameMode.SPECTATOR || proxyOwner(player.getUniqueId()))
+            && !canAct(player)) event.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
@@ -121,8 +138,9 @@ public final class MatchProtection implements Listener {
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void damage(EntityDamageEvent event) {
         if (!MatchAccessPolicy.active(game.state()) || !(event.getEntity() instanceof Player player)) return;
-        boolean participant = game.isAlive(player.getUniqueId());
-        if ((game.state() == MatchClock.State.PREGAME && participant)
+        UUID id = player.getUniqueId();
+        boolean participant = game.isAlive(id);
+        if (proxyOwner(id) || (game.state() == MatchClock.State.PREGAME && participant)
             || (participant && player.getWorld() != worlds.world())
             || (!participant && player.getWorld() == worlds.world())) event.setCancelled(true);
     }
@@ -134,9 +152,9 @@ public final class MatchProtection implements Listener {
         UUID owner = owner(damager);
         if (owner != null && ((event.getEntity().getWorld() == worlds.world() && !game.isAlive(owner))
             || !MatchAccessPolicy.canAct(game.state(), game.isAlive(owner),
-                damager.getWorld() == worlds.world()))) event.setCancelled(true);
+                damager.getWorld() == worlds.world(), proxyOwner(owner)))) event.setCancelled(true);
         if (event.getEntity() instanceof Player victim && victim.getWorld() == worlds.world()
-            && !game.isAlive(victim.getUniqueId())) event.setCancelled(true);
+            && (!game.isAlive(victim.getUniqueId()) || proxyOwner(victim.getUniqueId()))) event.setCancelled(true);
     }
 
     private UUID owner(Entity damager) {

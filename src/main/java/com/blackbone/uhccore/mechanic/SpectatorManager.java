@@ -88,6 +88,12 @@ public final class SpectatorManager implements Listener {
 
     @EventHandler public void leave(PlayerQuitEvent event) { spectatorIds.remove(event.getPlayer().getUniqueId()); }
 
+    /** Proxy deaths can happen while the original player's data is online again. */
+    public void retireConnectedParticipant(Player player) {
+        player.getEnderChest().clear();
+        equip(player);
+    }
+
     public void equip(Player player) {
         player.setGameMode(GameMode.SPECTATOR);
         player.getInventory().clear();

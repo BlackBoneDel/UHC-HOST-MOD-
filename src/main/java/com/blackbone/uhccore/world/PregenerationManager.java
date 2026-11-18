@@ -18,6 +18,9 @@ public final class PregenerationManager {
     }
 
     private static final int PARALLEL = 4;
+    // A slow/frozen chunk request must not let the skipped outer-circle cells
+    // fill an unbounded HashSet while the contiguous checkpoint is blocked.
+    static final int MAX_PENDING_INDICES = 2048;
     private final Plugin plugin;
     private final Database database;
     private final WorldManager worlds;
@@ -146,6 +149,10 @@ public final class PregenerationManager {
         return new Progress(job.state, job.generated, job.total, rate, eta);
     }
 
+    static boolean hasCheckpointRoom(Job current) {
+        return current.cursor - current.checkpoint < MAX_PENDING_INDICES;
+    }
+
     public void tick() {
         Job current = job;
         if (current == null || current.state != State.RUNNING) return;
@@ -156,7 +163,8 @@ public final class PregenerationManager {
         // A completed future can run synchronously (already generated chunk).
         // Bound both requests and skipped outer-circle cells per server tick.
         while (current.state == State.RUNNING && current.inflight < PARALLEL
-            && current.cursor < cells && inspected++ < 512 && requested < PARALLEL) {
+            && current.cursor < cells && hasCheckpointRoom(current)
+            && inspected++ < 512 && requested < PARALLEL) {
             int index = current.cursor++;
             int x = index / current.side - current.radius;
             int z = index % current.side - current.radius;

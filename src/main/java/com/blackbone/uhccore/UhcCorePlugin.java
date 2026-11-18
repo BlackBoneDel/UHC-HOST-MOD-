@@ -102,6 +102,7 @@ public final class UhcCorePlugin extends JavaPlugin implements Listener {
             combat = new CombatLoggerManager(this, settings, game, heads);
             game.setCombat(combat);
             spectators = new SpectatorManager(this, game, locales);
+            game.setSpectators(spectators);
             adminPanel = new AdminPanel(settings, database, locales, versions, game, worlds, generation);
             infoPanel = new InfoPanel(settings, locales, game, worlds, stats);
             staffPanel = new StaffPanel(this, locales, versions, freeze, mutes, game, reports);

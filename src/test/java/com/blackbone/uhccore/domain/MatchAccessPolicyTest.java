@@ -25,6 +25,14 @@ class MatchAccessPolicyTest {
         assertTrue(MatchAccessPolicy.mayTeleport(state, false, false));
     }
 
+    @Test void rejoiningProxyOwnerCannotActEvenBeforeSpectatorModeIsApplied() {
+        for (var state : new MatchClock.State[]{MatchClock.State.RUNNING, MatchClock.State.FINISHED}) {
+            assertFalse(MatchAccessPolicy.canAct(state, true, true, true));
+            assertFalse(MatchAccessPolicy.canAct(state, true, false, true));
+            assertTrue(MatchAccessPolicy.canAct(state, true, true, false));
+        }
+    }
+
     @Test void editingAndPostMatchAreNotConstrainedByArenaRules() {
         for (var state : new MatchClock.State[]{MatchClock.State.IDLE, MatchClock.State.FINISHED}) {
             assertFalse(MatchAccessPolicy.active(state));
