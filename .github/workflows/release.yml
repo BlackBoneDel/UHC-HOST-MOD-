@@ -1,0 +1,63 @@
+name: Release
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+      - name: Set version from tag
+        shell: bash
+        run: echo "UHC_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Build and verify release JAR
+        run: |
+          ./gradlew --no-daemon test pitest shadowJar
+          python3 scripts/verify_artifacts.py "build/libs/uhccore-${UHC_VERSION}.jar"
+      - name: Smoke-test release on official Paper 26.3
+        timeout-minutes: 8
+        run: python3 scripts/smoke_paper.py "build/libs/uhccore-${UHC_VERSION}.jar"
+      - name: Changelog from Conventional Commits
+        shell: bash
+        run: |
+          tag="$GITHUB_REF_NAME"
+          previous="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
+          if [[ -n "$previous" ]]; then range="${previous}..${tag}"; else range="$tag"; fi
+          printf '# %s\n\n' "$tag" > changelog.md
+          pattern='^([a-z]+)(\([^)]+\))?!?:[[:space:]]*(.+)$'
+          for category in 'Features:feat' 'Fixes:fix' 'Performance:perf' 'Other changes:other'; do
+            label="${category%%:*}"
+            type="${category#*:}"
+            lines=''
+            while IFS= read -r subject; do
+              if [[ "$subject" =~ $pattern ]]; then
+                kind="${BASH_REMATCH[1]}"
+                description="${BASH_REMATCH[3]}"
+                if [[ "$kind" == "$type" || ( "$type" == other && "$kind" != feat && "$kind" != fix && "$kind" != perf ) ]]; then
+                  lines+="- ${description}"$'\n'
+                fi
+              fi
+            done < <(git log --format=%s "$range")
+            if [[ -n "$lines" ]]; then printf '## %s\n%s\n' "$label" "$lines" >> changelog.md; fi
+          done
+          if [[ $(wc -l < changelog.md) -le 2 ]]; then printf 'No Conventional Commits in this release range.\n' >> changelog.md; fi
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          options=()
+          # Candidate tags publish artifacts for validation, not an approved league release.
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then options+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" "build/libs/uhccore-${UHC_VERSION}.jar" --title "UhcCore ${UHC_VERSION}" --notes-file changelog.md --verify-tag "${options[@]}"

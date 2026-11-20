@@ -1,0 +1,69 @@
+name: CI
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+      - name: Unit tests (JUnit 5 / MockBukkit)
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon test 2>&1 | tee build-result.log
+      - name: Business-rule mutation tests (PITest)
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon pitest 2>&1 | tee build-result.log
+      - name: Build shaded plugin and pack
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon build 2>&1 | tee build-result.log
+      - name: Verify shaded JAR and both resource packs
+        run: |
+          set -o pipefail
+          python3 scripts/verify_artifacts.py build/libs/uhccore-1.0.0.jar 2>&1 | tee -a build-result.log
+      - name: Boot and smoke-test official Paper 26.3
+        timeout-minutes: 8
+        run: |
+          set -o pipefail
+          python3 scripts/smoke_paper.py build/libs/uhccore-1.0.0.jar 2>&1 | tee -a build-result.log
+      - uses: actions/upload-artifact@v7
+        if: success()
+        with:
+          name: uhccore-shaded-plugin
+          path: build/libs/uhccore-1.0.0.jar
+          if-no-files-found: error
+          retention-days: 7
+      - name: Annotate failed build diagnostics
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('build-result.log')
+          lines = path.read_text(errors='replace').splitlines() if path.exists() else ['No Gradle log was produced']
+          message = '\n'.join(lines[-110:])[-14000:]
+          print('::error title=Gradle diagnostics::' + message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
+          PY
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: verification-reports
+          path: |
+            build/test-results/test/
+            build/reports/tests/test/
+            build/reports/pitest/
+          if-no-files-found: ignore

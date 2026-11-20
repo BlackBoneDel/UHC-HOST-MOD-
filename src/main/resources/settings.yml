@@ -1,0 +1,41 @@
+topologia: STANDALONE
+proxy-lobby: lobby
+pre-game-seconds: 120
+mundo:
+  nombre: uhc_world
+  radio: 1200
+  semilla: 0
+  min-distancia-scatter: 96
+mecanicas:
+  random-killer: true
+  random-killer-periodo-segundos: 900
+  random-killer-recompensa-elo: 15
+  timebomb: true
+  timebomb-segundos: 30
+  golden-heads: true
+  golden-heads-probabilidad: 0.65
+  scatter-seguro: true
+  combat-logger-expiracion: AUTO_DEATH # AUTO_DEATH credits the last attacker; FORFEIT does not
+borde:
+  fases:
+    - inicio: 900
+      duracion: 300
+      radio: 500
+    - inicio: 1800
+      duracion: 300
+      radio: 150
+    - inicio: 2700
+      duracion: 180
+      radio: 25
+compatibilidad:
+  modo: ESTRICTO
+  protocolo-minimo: 777
+  protocolo-maximo: 777
+resource-pack:
+  bind: 0.0.0.0
+  puerto: 8088
+  host-publico: ''
+  url-externa: ''
+  url-externa-legacy: ''
+discord:
+  webhook-url: ''

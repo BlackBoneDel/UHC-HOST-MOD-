@@ -1,0 +1,37 @@
+name: UhcCore
+version: ${version}
+main: com.blackbone.uhccore.UhcCorePlugin
+api-version: '26.3'
+description: Core de UHC competitivo, una partida activa por servidor
+author: BlackBoneDel
+load: POSTWORLD
+# Optional Paper server dependencies load before UhcCore; ViaVersion shares its API classpath.
+dependencies:
+  server:
+    ViaVersion:
+      load: BEFORE
+      required: false
+      join-classpath: true
+    ViaBackwards:
+      load: BEFORE
+      required: false
+      join-classpath: false
+    LuckPerms:
+      load: BEFORE
+      required: false
+      join-classpath: false
+permissions:
+  uhccore.play:
+    default: true
+  uhccore.staff:
+    default: op
+  uhccore.staff.notify:
+    default: op
+  uhccore.admin:
+    default: op
+  uhccore.rank.admin:
+    default: op
+  uhccore.rank.staff:
+    default: op
+  uhccore.proxy:
+    default: op
